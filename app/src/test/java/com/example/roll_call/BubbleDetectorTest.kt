@@ -129,7 +129,7 @@ class BubbleDetectorTest {
     @Test
     fun classifyAnswerSelection_returnsMultiple_whenTwoAnswersAreFilled() {
         val result = BubbleDetector.classifyAnswerSelection(
-            mapOf("A" to 0.05, "B" to 0.06, "C" to 0.34, "D" to 0.39),
+            mapOf("A" to 0.05, "B" to 0.06, "C" to 0.40, "D" to 0.43),
             filledThreshold = 0.28,
             blankThreshold = 0.12,
             uncertainDelta = 0.08
@@ -138,6 +138,20 @@ class BubbleDetectorTest {
         assertEquals(OmrAnswerStatus.MULTIPLE, result.status)
         assertEquals("D", result.selected)
     }
+
+    @Test
+    fun classifyAnswerSelection_returnsSingleAnswer_whenSecondCandidateIsOnlyPrintNoise() {
+        val result = BubbleDetector.classifyAnswerSelection(
+            mapOf("A" to 0.34, "B" to 0.46, "C" to 0.08, "D" to 0.07),
+            filledThreshold = 0.28,
+            blankThreshold = 0.12,
+            uncertainDelta = 0.08
+        )
+
+        assertEquals(OmrAnswerStatus.OK, result.status)
+        assertEquals("B", result.selected)
+    }
+
     @Test
     fun classifyAnswerSelection_returnsAnswer_whenBubbleReachesFilledThreshold() {
         val result = BubbleDetector.classifyAnswerSelection(

@@ -392,8 +392,17 @@ class OmrProcessor(
                 val selected = answer?.answer?.uppercase()
                 val correct = correctAnswers[row.questionNumber.toString()]?.trim()?.uppercase()
                 val isBlank = selected.isNullOrBlank() || answer?.status == OmrAnswerStatus.BLANK
+                val multipleOptions = if (answer?.status == OmrAnswerStatus.MULTIPLE && answer.fillRatios.isNotEmpty()) {
+                    bubbleDetector.classifyAnswerSelection(answer.fillRatios)
+                        .filledCandidates
+                        .map { it.uppercase() }
+                        .toSet()
+                } else {
+                    emptySet<String>()
+                }
                 row.bubblesByOption.forEach { (option, bubble) ->
                     val color = when {
+                        option in multipleOptions -> COLOR_MULTIPLE
                         correct.isNullOrBlank() && selected == option -> COLOR_SELECTED_NO_KEY
                         isBlank -> COLOR_BLANK
                         selected == option && selected == correct -> COLOR_CORRECT
@@ -427,6 +436,7 @@ class OmrProcessor(
         private val COLOR_CORRECT = Scalar(0.0, 180.0, 0.0, 255.0)
         private val COLOR_WRONG = Scalar(255.0, 0.0, 0.0, 255.0)
         private val COLOR_BLANK = Scalar(0.0, 120.0, 255.0, 255.0)
+        private val COLOR_MULTIPLE = Scalar(255.0, 210.0, 0.0, 255.0)
         private val COLOR_NEUTRAL = Scalar(180.0, 180.0, 180.0, 255.0)
         private val COLOR_CODE_BUBBLE = Scalar(255.0, 170.0, 0.0, 255.0)
         private val COLOR_SELECTED_NO_KEY = Scalar(0.0, 120.0, 255.0, 255.0)

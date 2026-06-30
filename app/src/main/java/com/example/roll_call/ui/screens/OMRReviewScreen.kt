@@ -57,6 +57,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.roll_call.domain.model.Student
+import com.example.roll_call.domain.model.omr.FixedOmrTemplate
 import com.example.roll_call.domain.model.omr.OmrAnswerStatus
 import com.example.roll_call.domain.model.omr.OmrPrintVersion
 import com.example.roll_call.domain.model.omr.OmrScanResult
@@ -74,6 +75,7 @@ import com.example.roll_call.ui.theme.EduSurface
 import com.example.roll_call.ui.theme.EduTextPrimary
 import com.example.roll_call.ui.theme.EduTextSecondary
 import com.example.roll_call.ui.viewmodel.OmrReviewViewModel
+import com.example.roll_call.utils.omr.BubbleDetector
 import java.util.Locale
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -199,6 +201,7 @@ fun OMRReviewScreen(
                         answer = uiState.editableAnswers[question],
                         status = uiState.editableStatuses[question] ?: OmrAnswerStatus.BLANK,
                         correctAnswer = uiState.grade?.correctAnswers?.get(question.toString()),
+                        fillRatios = uiState.scanResult?.answers?.firstOrNull { it.questionNumber == question }?.fillRatios.orEmpty(),
                         onAnswerChange = { answer -> viewModel.updateAnswer(question, answer) }
                     )
                 }
@@ -327,6 +330,7 @@ private fun AnswerEditorRow(
     answer: String?,
     status: OmrAnswerStatus,
     correctAnswer: String?,
+    fillRatios: Map<String, Double>,
     onAnswerChange: (String?) -> Unit
 ) {
     val normalizedAnswer = OmrGrader.normalizeAnswer(answer)
@@ -335,20 +339,36 @@ private fun AnswerEditorRow(
     val isBlank = normalizedAnswer.isNullOrBlank() || status == OmrAnswerStatus.BLANK
     val isCorrect = OmrGrader.isAnswerCorrect(normalizedAnswer, status, normalizedCorrect)
     val isWrong = hasCorrectAnswer && !isBlank && !isCorrect
+    val isMultiple = status == OmrAnswerStatus.MULTIPLE
+    val multipleOptions = remember(status, fillRatios) {
+        if (isMultiple && fillRatios.isNotEmpty()) {
+            BubbleDetector.classifyAnswerSelection(
+                fillRatios = fillRatios,
+                filledThreshold = FixedOmrTemplate.default.filledThreshold,
+                blankThreshold = FixedOmrTemplate.default.blankThreshold,
+                uncertainDelta = FixedOmrTemplate.default.uncertainDelta
+            ).filledCandidates.map { it.uppercase() }.toSet()
+        } else {
+            emptySet()
+        }
+    }
 
     val accentColor = when {
+        isMultiple -> EduOrange
         isBlank -> EduBlue
         isCorrect -> EduGreen
         isWrong -> EduRed
         else -> EduTextSecondary
     }
     val stateBg = when {
+        isMultiple -> EduOrangeLight
         isBlank -> EduBlueLight
         isCorrect -> EduGreenLight
         isWrong -> EduRedLight
         else -> EduBackground
     }
     val rowBg = when {
+        isMultiple -> EduOrangeLight.copy(alpha = 0.50f)
         isBlank -> EduBlueLight.copy(alpha = 0.42f)
         isCorrect -> EduGreenLight.copy(alpha = 0.42f)
         isWrong -> EduRedLight.copy(alpha = 0.50f)
@@ -382,13 +402,17 @@ private fun AnswerEditorRow(
                 )
                 Row(modifier = Modifier.weight(1f).horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     listOf("A", "B", "C", "D").forEach { option ->
+                        val isMultipleOption = option in multipleOptions
+                        val isSelectedOption = normalizedAnswer == option || isMultipleOption
+                        val chipContainerColor = if (isMultipleOption) EduOrangeLight else stateBg
+                        val chipLabelColor = if (isMultipleOption) EduOrange else accentColor
                         FilterChip(
-                            selected = normalizedAnswer == option,
+                            selected = isSelectedOption,
                             onClick = { onAnswerChange(option) },
                             label = { Text(option) },
                             colors = FilterChipDefaults.filterChipColors(
-                                selectedContainerColor = stateBg,
-                                selectedLabelColor = accentColor
+                                selectedContainerColor = chipContainerColor,
+                                selectedLabelColor = chipLabelColor
                             )
                         )
                     }

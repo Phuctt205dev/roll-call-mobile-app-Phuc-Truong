@@ -92,6 +92,9 @@ class BubbleDetector(
         private const val SOFT_SELECTION_RATIO = 1.35
         private const val ANSWER_FILLED_THRESHOLD_FACTOR = 1.0
         private const val ANSWER_BLANK_THRESHOLD_FACTOR = 2.25
+        private const val ANSWER_MULTIPLE_THRESHOLD_FACTOR = 1.28
+        private const val ANSWER_MULTIPLE_BLANK_FACTOR = 3.0
+        private const val ANSWER_MULTIPLE_RELATIVE_FACTOR = 0.82
         private const val DIGIT_DOMINANCE_RATIO = 1.22
         private const val DIGIT_DELTA_FACTOR = 0.55
         private const val DIGIT_BASELINE_DELTA_FACTOR = 0.35
@@ -147,13 +150,23 @@ class BubbleDetector(
                 filledThreshold * ANSWER_FILLED_THRESHOLD_FACTOR,
                 blankThreshold * ANSWER_BLANK_THRESHOLD_FACTOR
             )
+            val multipleThreshold = maxOf(
+                filledThreshold * ANSWER_MULTIPLE_THRESHOLD_FACTOR,
+                blankThreshold * ANSWER_MULTIPLE_BLANK_FACTOR
+            )
             val filled = sorted.filter { it.value >= effectiveFilledThreshold }
+            val multipleCandidates = sorted.filter { it.value >= multipleThreshold }
+            val secondMultipleCandidate = multipleCandidates.drop(1).firstOrNull()
+            val hasMultipleStrongCandidates = secondMultipleCandidate != null &&
+                secondMultipleCandidate.value >= top.value * ANSWER_MULTIPLE_RELATIVE_FACTOR
 
             return when {
                 filled.isEmpty() -> BubbleSelection(null, OmrAnswerStatus.BLANK, emptyList())
-                filled.size > 1 -> BubbleSelection(top.key, OmrAnswerStatus.MULTIPLE, filled.map { it.key })
-                second != null && top.value - second.value < uncertainDelta -> {
-                    BubbleSelection(top.key, OmrAnswerStatus.UNCERTAIN, listOf(top.key))
+                hasMultipleStrongCandidates -> {
+                    BubbleSelection(top.key, OmrAnswerStatus.MULTIPLE, multipleCandidates.map { it.key })
+                }
+                filled.size > 1 && second != null && top.value - second.value < uncertainDelta -> {
+                    BubbleSelection(top.key, OmrAnswerStatus.UNCERTAIN, filled.map { it.key })
                 }
                 else -> BubbleSelection(top.key, OmrAnswerStatus.OK, listOf(top.key))
             }

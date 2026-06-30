@@ -94,7 +94,8 @@ class BubbleDetector(
         private const val ANSWER_BLANK_THRESHOLD_FACTOR = 2.25
         private const val ANSWER_MULTIPLE_THRESHOLD_FACTOR = 1.0
         private const val ANSWER_MULTIPLE_BLANK_FACTOR = 2.3
-        private const val ANSWER_MULTIPLE_RELATIVE_FACTOR = 0.70
+        private const val ANSWER_MULTIPLE_RELATIVE_FACTOR = 0.76
+        private const val ANSWER_MULTIPLE_MAX_DELTA_FACTOR = 1.35
         private const val ANSWER_MARKED_CONTRAST_FACTOR = 0.70
         private const val ANSWER_BLANK_SPREAD_FACTOR = 0.85
         private const val DIGIT_DOMINANCE_RATIO = 1.22
@@ -169,7 +170,10 @@ class BubbleDetector(
                 it.value >= multipleThreshold && it.value - rowBaseline >= minMarkedContrast
             }
             val strongMultipleCandidates = multipleCandidates.filterIndexed { index, candidate ->
-                index == 0 || candidate.value >= top.value * ANSWER_MULTIPLE_RELATIVE_FACTOR
+                index == 0 || (
+                    candidate.value >= top.value * ANSWER_MULTIPLE_RELATIVE_FACTOR &&
+                        top.value - candidate.value <= uncertainDelta * ANSWER_MULTIPLE_MAX_DELTA_FACTOR
+                )
             }
 
             return when {

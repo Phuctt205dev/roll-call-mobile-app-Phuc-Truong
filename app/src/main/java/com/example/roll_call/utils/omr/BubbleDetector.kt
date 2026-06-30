@@ -29,7 +29,7 @@ class BubbleDetector(
         val roiRect = Rect(left, top, right - left, bottom - top)
         val roi = Mat(binaryInverse, roiRect)
         val mask = Mat.zeros(roi.rows(), roi.cols(), CvType.CV_8UC1)
-        val readRadius = (cropRadius * 0.62).toInt()
+        val readRadius = (cropRadius * 0.76).toInt()
             .coerceAtLeast(3)
             .coerceAtMost(minOf(roi.cols(), roi.rows()) / 2)
         Imgproc.circle(
@@ -92,9 +92,9 @@ class BubbleDetector(
         private const val SOFT_SELECTION_RATIO = 1.35
         private const val ANSWER_FILLED_THRESHOLD_FACTOR = 1.0
         private const val ANSWER_BLANK_THRESHOLD_FACTOR = 2.25
-        private const val ANSWER_MULTIPLE_THRESHOLD_FACTOR = 1.28
-        private const val ANSWER_MULTIPLE_BLANK_FACTOR = 3.0
-        private const val ANSWER_MULTIPLE_RELATIVE_FACTOR = 0.82
+        private const val ANSWER_MULTIPLE_THRESHOLD_FACTOR = 1.0
+        private const val ANSWER_MULTIPLE_BLANK_FACTOR = 2.3
+        private const val ANSWER_MULTIPLE_RELATIVE_FACTOR = 0.70
         private const val DIGIT_DOMINANCE_RATIO = 1.22
         private const val DIGIT_DELTA_FACTOR = 0.55
         private const val DIGIT_BASELINE_DELTA_FACTOR = 0.35
@@ -156,16 +156,16 @@ class BubbleDetector(
             )
             val filled = sorted.filter { it.value >= effectiveFilledThreshold }
             val multipleCandidates = sorted.filter { it.value >= multipleThreshold }
-            val secondMultipleCandidate = multipleCandidates.drop(1).firstOrNull()
-            val hasMultipleStrongCandidates = secondMultipleCandidate != null &&
-                secondMultipleCandidate.value >= top.value * ANSWER_MULTIPLE_RELATIVE_FACTOR
+            val strongMultipleCandidates = multipleCandidates.filterIndexed { index, candidate ->
+                index == 0 || candidate.value >= top.value * ANSWER_MULTIPLE_RELATIVE_FACTOR
+            }
 
             return when {
                 filled.isEmpty() -> BubbleSelection(null, OmrAnswerStatus.BLANK, emptyList())
-                hasMultipleStrongCandidates -> {
-                    BubbleSelection(top.key, OmrAnswerStatus.MULTIPLE, multipleCandidates.map { it.key })
+                strongMultipleCandidates.size > 1 -> {
+                    BubbleSelection(top.key, OmrAnswerStatus.MULTIPLE, strongMultipleCandidates.map { it.key })
                 }
-                filled.size > 1 && second != null && top.value - second.value < uncertainDelta -> {
+                filled.size > 1 -> {
                     BubbleSelection(top.key, OmrAnswerStatus.UNCERTAIN, filled.map { it.key })
                 }
                 else -> BubbleSelection(top.key, OmrAnswerStatus.OK, listOf(top.key))

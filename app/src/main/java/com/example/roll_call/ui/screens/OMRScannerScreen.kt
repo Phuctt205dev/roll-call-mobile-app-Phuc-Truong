@@ -62,6 +62,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
@@ -258,10 +259,9 @@ fun OMRScannerScreen(
                         onClick = { isFlashOn = !isFlashOn },
                         modifier = Modifier.size(44.dp)
                     ) {
-                        Icon(
-                            imageVector = Icons.Default.CameraAlt,
-                            contentDescription = if (isFlashOn) "T\u1eaft flash" else "B\u1eadt flash",
-                            tint = if (isFlashOn) EduOrange else Color.White
+                        LightningIcon(
+                            tint = if (isFlashOn) EduOrange else Color.White,
+                            modifier = Modifier.size(24.dp)
                         )
                     }
                 }
@@ -314,6 +314,21 @@ fun OMRScannerScreen(
     }
 }
 
+@Composable
+private fun LightningIcon(tint: Color, modifier: Modifier = Modifier) {
+    Canvas(modifier = modifier) {
+        val path = Path().apply {
+            moveTo(size.width * 0.58f, 0f)
+            lineTo(size.width * 0.22f, size.height * 0.56f)
+            lineTo(size.width * 0.48f, size.height * 0.56f)
+            lineTo(size.width * 0.38f, size.height)
+            lineTo(size.width * 0.78f, size.height * 0.42f)
+            lineTo(size.width * 0.52f, size.height * 0.42f)
+            close()
+        }
+        drawPath(path = path, color = tint)
+    }
+}
 @Composable
 private fun StatusPill(text: String, color: Color, modifier: Modifier = Modifier) {
     Row(

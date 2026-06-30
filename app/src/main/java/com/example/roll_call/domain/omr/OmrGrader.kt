@@ -116,9 +116,7 @@ object OmrGrader {
     fun isAnswerCorrect(answer: String?, status: OmrAnswerStatus?, correctAnswer: String?): Boolean {
         val normalizedAnswer = normalizeAnswer(answer) ?: return false
         val normalizedCorrect = normalizeAnswer(correctAnswer) ?: return false
-        val normalizedStatus = status ?: OmrAnswerStatus.BLANK
-        if (normalizedStatus == OmrAnswerStatus.BLANK) return false
-        return normalizedAnswer == normalizedCorrect
+        return status == OmrAnswerStatus.OK && normalizedAnswer == normalizedCorrect
     }
 
     fun normalizeQuestionAnswers(answers: List<OmrQuestionAnswer>): Map<Int, String?> {

@@ -1,6 +1,7 @@
 package com.example.roll_call.data.repository
 
 import com.example.roll_call.domain.model.Student
+import com.example.roll_call.domain.model.omr.OmrAnswerStatus
 import com.example.roll_call.domain.model.omr.OmrClassExam
 import com.example.roll_call.domain.model.omr.OmrExam
 import com.example.roll_call.domain.model.omr.OmrGrade
@@ -212,9 +213,13 @@ class OmrRepository {
 
     private fun OmrGrade.toExamAttemptMap(sourceGradeId: String): Map<String, Any?> {
         val answerResults = answers.mapValues { (questionId, selected) ->
+            val status = answerStatuses[questionId]
+            val correct = correctAnswers[questionId]
             mapOf(
                 "selected" to selected,
-                "isCorrect" to (selected == correctAnswers[questionId])
+                "status" to status,
+                "correctAnswer" to correct,
+                "isCorrect" to (status == OmrAnswerStatus.OK.name && selected == correct)
             )
         }
 

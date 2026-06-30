@@ -334,7 +334,6 @@ private fun AnswerEditorRow(
     val hasCorrectAnswer = !normalizedCorrect.isNullOrBlank()
     val isBlank = normalizedAnswer.isNullOrBlank() || status == OmrAnswerStatus.BLANK
     val isCorrect = OmrGrader.isAnswerCorrect(normalizedAnswer, status, normalizedCorrect)
-    val isReviewCorrect = isCorrect && status != OmrAnswerStatus.OK
     val isWrong = hasCorrectAnswer && !isBlank && !isCorrect
 
     val accentColor = when {
@@ -358,7 +357,10 @@ private fun AnswerEditorRow(
     val verdictText = when {
         isBlank && hasCorrectAnswer -> "B\u1ecf tr\u1ed1ng - \u0111\u00fang: $normalizedCorrect"
         isBlank -> "B\u1ecf tr\u1ed1ng"
-        isReviewCorrect -> "\u0110\u00fang - c\u1ea7n ki\u1ec3m tra"
+        status == OmrAnswerStatus.MULTIPLE && hasCorrectAnswer -> "T\u00f4 nhi\u1ec1u - \u0111\u00fang: $normalizedCorrect"
+        status == OmrAnswerStatus.MULTIPLE -> "T\u00f4 nhi\u1ec1u"
+        status == OmrAnswerStatus.UNCERTAIN && hasCorrectAnswer -> "C\u1ea7n ki\u1ec3m tra - \u0111\u00fang: $normalizedCorrect"
+        status == OmrAnswerStatus.UNCERTAIN -> "C\u1ea7n ki\u1ec3m tra"
         isCorrect -> "\u0110\u00fang"
         isWrong -> "Sai - \u0111\u00fang: $normalizedCorrect"
         else -> "\u0110\u00e3 nh\u1eadn: ${normalizedAnswer ?: "?"}"

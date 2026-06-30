@@ -50,7 +50,7 @@ class OmrGraderTest {
     }
 
     @Test
-    fun gradeAnswers_countsSelectedAnswersWhenTheyMatchCorrectKey() {
+    fun gradeAnswers_countsOnlyOkSelectedAnswersWhenTheyMatchCorrectKey() {
         val scan = scanResult(
             listOf(
                 OmrQuestionAnswer(1, "A", OmrAnswerStatus.OK),
@@ -77,8 +77,8 @@ class OmrGraderTest {
             studentId = "student1"
         )
 
-        assertEquals(3, grade.correctCount)
-        assertEquals(7.5, grade.score, 0.001)
+        assertEquals(2, grade.correctCount)
+        assertEquals(5.0, grade.score, 0.001)
         assertEquals("MULTIPLE", grade.answerStatuses["2"])
     }
 
@@ -111,7 +111,7 @@ class OmrGraderTest {
     }
 
     @Test
-    fun gradeAnswers_countsUncertainAnswerWhenItMatchesCorrectAnswer() {
+    fun gradeAnswers_doesNotCountUncertainAnswerWhenItMatchesCorrectAnswer() {
         val scan = scanResult(listOf(OmrQuestionAnswer(1, "A", OmrAnswerStatus.UNCERTAIN)))
         val key = OmrPrintVersion(
             id = "v1",
@@ -131,8 +131,8 @@ class OmrGraderTest {
             studentId = "student1"
         )
 
-        assertEquals(1, grade.correctCount)
-        assertEquals(10.0, grade.score, 0.001)
+        assertEquals(0, grade.correctCount)
+        assertEquals(0.0, grade.score, 0.001)
         assertEquals("A", grade.correctAnswers["1"])
     }
 

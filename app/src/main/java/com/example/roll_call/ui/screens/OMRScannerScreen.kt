@@ -136,9 +136,8 @@ fun OMRScannerScreen(
         }
     }
 
-    fun captureHighQualityFrame(isAutoCapture: Boolean) {
+    fun captureHighQualityFrame() {
         localError = null
-        if (isAutoCapture) viewModel.markAutoCaptureStarted()
         cameraController.takePicture(
             ContextCompat.getMainExecutor(context),
             object : ImageCapture.OnImageCapturedCallback() {
@@ -147,7 +146,7 @@ fun OMRScannerScreen(
                     image.close()
                     if (bitmap == null) {
                         val message = "Kh\u00f4ng \u0111\u1ecdc \u0111\u01b0\u1ee3c \u1ea3nh t\u1eeb camera"
-                        if (isAutoCapture) viewModel.onAutoCaptureFailed(message) else localError = message
+                        localError = message
                     } else {
                         viewModel.processCapturedBitmap(bitmap, context.cacheDir.resolve("omr_debug"))
                     }
@@ -155,16 +154,10 @@ fun OMRScannerScreen(
 
                 override fun onError(exception: ImageCaptureException) {
                     val message = exception.message ?: "Kh\u00f4ng ch\u1ee5p \u0111\u01b0\u1ee3c \u1ea3nh"
-                    if (isAutoCapture) viewModel.onAutoCaptureFailed(message) else localError = message
+                    localError = message
                 }
             }
         )
-    }
-
-    LaunchedEffect(uiState.autoCaptureRequestId, hasCameraPermission) {
-        if (uiState.autoCaptureRequestId > 0L && hasCameraPermission) {
-            captureHighQualityFrame(isAutoCapture = true)
-        }
     }
 
     LaunchedEffect(Unit) {
@@ -267,7 +260,7 @@ fun OMRScannerScreen(
                     if (uiState.isScanPaused || uiState.latestResult != null) {
                         viewModel.resumeScanning()
                     } else {
-                        captureHighQualityFrame(isAutoCapture = false)
+                        captureHighQualityFrame()
                     }
                 },
                 enabled = hasCameraPermission && !uiState.isProcessing && !uiState.isInitializing,

@@ -40,9 +40,7 @@ data class OmrScannerUiState(
     val isSheetInFrame: Boolean = false,
     val isScanPaused: Boolean = false,
     val isSavingGrade: Boolean = false,
-    val savedGradeId: String? = null,
-    val isAutoCapturing: Boolean = false,
-    val autoCaptureRequestId: Long = 0L
+    val savedGradeId: String? = null
 )
 
 private data class ScanValidation(
@@ -65,7 +63,6 @@ class OmrScannerViewModel : ViewModel() {
     private var stableFrameCount = 0
     private var lastAcceptedSignature: String? = null
     private var lastAcceptedAtMs = 0L
-    private var lastAutoCaptureAtMs = 0L
     private var lastValidIdentity: String? = null
     private var validFrameCount = 0
     private val validFrameResults = mutableListOf<OmrScanResult>()
@@ -132,7 +129,6 @@ class OmrScannerViewModel : ViewModel() {
         val state = _uiState.value
         return !realtimeProcessing &&
             !state.isInitializing &&
-            !state.isAutoCapturing &&
             !state.isScanPaused &&
             state.latestResult == null &&
             now - lastRealtimeAttemptMs >= REALTIME_INTERVAL_MS
@@ -180,7 +176,6 @@ class OmrScannerViewModel : ViewModel() {
         viewModelScope.launch {
             _uiState.value = _uiState.value.copy(
                 isProcessing = true,
-                isAutoCapturing = false,
                 error = null,
                 realtimeStatus = "\u0110ang x\u1eed l\u00fd phi\u1ebfu",
                 isScanPaused = true
@@ -207,7 +202,6 @@ class OmrScannerViewModel : ViewModel() {
                         resetRealtimeTracking()
                         _uiState.value = _uiState.value.copy(
                             isProcessing = false,
-                            isAutoCapturing = false,
                             latestResult = null,
                             realtimeStatus = validation.message,
                             stableFrameCount = 0,
@@ -233,7 +227,6 @@ class OmrScannerViewModel : ViewModel() {
                     val realtimeResult = buildRealtimeResult(finalScan, validation.answerKey, validation.student)
                     _uiState.value = _uiState.value.copy(
                         isProcessing = false,
-                        isAutoCapturing = false,
                         latestResult = realtimeResult,
                         realtimeStatus = realtimeResult.message,
                         isSheetInFrame = true,
@@ -244,7 +237,6 @@ class OmrScannerViewModel : ViewModel() {
                 onFailure = { error ->
                     _uiState.value = _uiState.value.copy(
                         isProcessing = false,
-                        isAutoCapturing = false,
                         isSheetInFrame = false,
                         isScanPaused = false,
                         error = error.message ?: "Kh\u00f4ng x\u1eed l\u00fd \u0111\u01b0\u1ee3c phi\u1ebfu"
@@ -266,13 +258,11 @@ class OmrScannerViewModel : ViewModel() {
         resetRealtimeTracking()
         lastAcceptedSignature = null
         lastAcceptedAtMs = 0L
-        lastAutoCaptureAtMs = 0L
         if (clearStudentCache) studentCache.clear()
         _uiState.value = _uiState.value.copy(
             latestResult = null,
             error = null,
             savedGradeId = null,
-            isAutoCapturing = false,
             realtimeStatus = "C\u0103n 4 \u00f4 vu\u00f4ng \u0111en v\u00e0o 4 g\u00f3c khung",
             stableFrameCount = 0,
             isSheetInFrame = false,
@@ -282,24 +272,6 @@ class OmrScannerViewModel : ViewModel() {
 
     fun clearError() {
         _uiState.value = _uiState.value.copy(error = null)
-    }
-
-    fun markAutoCaptureStarted() {
-        _uiState.value = _uiState.value.copy(
-            isAutoCapturing = true,
-            isProcessing = true,
-            error = null,
-            realtimeStatus = "\u0110ang t\u1ef1 ch\u1ee5p phi\u1ebfu r\u00f5 n\u00e9t"
-        )
-    }
-
-    fun onAutoCaptureFailed(message: String) {
-        _uiState.value = _uiState.value.copy(
-            isAutoCapturing = false,
-            isProcessing = false,
-            isScanPaused = false,
-            error = message
-        )
     }
 
     fun saveLatestGrade() {
@@ -330,16 +302,6 @@ class OmrScannerViewModel : ViewModel() {
 
     private suspend fun handleRealtimeCandidate(result: OmrScanResult, bitmap: Bitmap, cacheDir: File?) {
         val sheetVisible = result.debugInfo.markerCount >= MIN_MARKERS_FOR_SHEET
-        if (sheetVisible) {
-            stableFrameCount += 1
-            if (shouldAutoCaptureHighQualityFrame()) {
-                requestAutoCapture()
-                return
-            }
-        } else {
-            stableFrameCount = 0
-        }
-
         if (!isRealtimeCandidate(result)) {
             resetRealtimeTracking(keepSheetFrames = sheetVisible)
             _uiState.value = _uiState.value.copy(
@@ -596,30 +558,6 @@ class OmrScannerViewModel : ViewModel() {
         return "${OmrGrader.normalizeExamCode(result.examCode)}|${result.studentCode.filter { it.isDigit() }}|$answersSignature"
     }
 
-    private fun shouldAutoCaptureHighQualityFrame(): Boolean {
-        val now = System.currentTimeMillis()
-        val state = _uiState.value
-        return stableFrameCount >= REQUIRED_SHEET_FRAMES_FOR_AUTO_CAPTURE &&
-            !state.isProcessing &&
-            !state.isInitializing &&
-            !state.isAutoCapturing &&
-            !state.isScanPaused &&
-            state.latestResult == null &&
-            now - lastAutoCaptureAtMs >= AUTO_CAPTURE_COOLDOWN_MS
-    }
-
-    private fun requestAutoCapture() {
-        lastAutoCaptureAtMs = System.currentTimeMillis()
-        _uiState.value = _uiState.value.copy(
-            autoCaptureRequestId = _uiState.value.autoCaptureRequestId + 1L,
-            realtimeStatus = "\u0110ang t\u1ef1 ch\u1ee5p phi\u1ebfu r\u00f5 n\u00e9t",
-            stableFrameCount = stableFrameCount,
-            isSheetInFrame = true,
-            isScanPaused = false,
-            error = null
-        )
-    }
-
     private fun resetRealtimeTracking(keepSheetFrames: Boolean = false) {
         if (!keepSheetFrames) stableFrameCount = 0
         lastValidIdentity = null
@@ -633,14 +571,12 @@ class OmrScannerViewModel : ViewModel() {
     }
 
     companion object {
-        private const val REALTIME_INTERVAL_MS = 320L
-        private const val REQUIRED_SHEET_FRAMES_FOR_AUTO_CAPTURE = 2
-        private const val AUTO_CAPTURE_COOLDOWN_MS = 3000L
+        private const val REALTIME_INTERVAL_MS = 700L
         private const val MIN_MARKERS_FOR_SHEET = 4
-        private const val REQUIRED_VALID_FRAMES = 2
-        private const val MIN_REALTIME_CONFIDENCE = 0.25
-        private const val DUPLICATE_RESULT_COOLDOWN_MS = 1800L
-        private const val MAX_VALID_FRAME_BUFFER = 4
+        private const val REQUIRED_VALID_FRAMES = 4
+        private const val MIN_REALTIME_CONFIDENCE = 0.32
+        private const val DUPLICATE_RESULT_COOLDOWN_MS = 2200L
+        private const val MAX_VALID_FRAME_BUFFER = 6
         private val ANSWER_OPTIONS = listOf("A", "B", "C", "D")
     }
 }

@@ -95,6 +95,8 @@ class BubbleDetector(
         private const val ANSWER_MULTIPLE_THRESHOLD_FACTOR = 1.0
         private const val ANSWER_MULTIPLE_BLANK_FACTOR = 2.3
         private const val ANSWER_MULTIPLE_RELATIVE_FACTOR = 0.70
+        private const val ANSWER_MARKED_CONTRAST_FACTOR = 0.70
+        private const val ANSWER_BLANK_SPREAD_FACTOR = 0.85
         private const val DIGIT_DOMINANCE_RATIO = 1.22
         private const val DIGIT_DELTA_FACTOR = 0.55
         private const val DIGIT_BASELINE_DELTA_FACTOR = 0.35
@@ -146,6 +148,10 @@ class BubbleDetector(
             val sorted = fillRatios.entries.sortedByDescending { it.value }
             val top = sorted.first()
             val second = sorted.drop(1).firstOrNull()
+            val baselineValues = sorted.map { it.value }.sorted().take(2)
+            val rowBaseline = baselineValues.average().takeIf { !it.isNaN() } ?: 0.0
+            val topContrast = top.value - rowBaseline
+            val secondContrast = (second?.value ?: 0.0) - rowBaseline
             val effectiveFilledThreshold = maxOf(
                 filledThreshold * ANSWER_FILLED_THRESHOLD_FACTOR,
                 blankThreshold * ANSWER_BLANK_THRESHOLD_FACTOR
@@ -154,24 +160,31 @@ class BubbleDetector(
                 filledThreshold * ANSWER_MULTIPLE_THRESHOLD_FACTOR,
                 blankThreshold * ANSWER_MULTIPLE_BLANK_FACTOR
             )
-            val filled = sorted.filter { it.value >= effectiveFilledThreshold }
-            val multipleCandidates = sorted.filter { it.value >= multipleThreshold }
+            val minMarkedContrast = uncertainDelta * ANSWER_MARKED_CONTRAST_FACTOR
+            val blankSpread = uncertainDelta * ANSWER_BLANK_SPREAD_FACTOR
+            val filled = sorted.filter {
+                it.value >= effectiveFilledThreshold && it.value - rowBaseline >= minMarkedContrast
+            }
+            val multipleCandidates = sorted.filter {
+                it.value >= multipleThreshold && it.value - rowBaseline >= minMarkedContrast
+            }
             val strongMultipleCandidates = multipleCandidates.filterIndexed { index, candidate ->
                 index == 0 || candidate.value >= top.value * ANSWER_MULTIPLE_RELATIVE_FACTOR
             }
 
             return when {
+                top.value < effectiveFilledThreshold -> BubbleSelection(null, OmrAnswerStatus.BLANK, emptyList())
+                topContrast < blankSpread -> BubbleSelection(null, OmrAnswerStatus.BLANK, emptyList())
                 filled.isEmpty() -> BubbleSelection(null, OmrAnswerStatus.BLANK, emptyList())
                 strongMultipleCandidates.size > 1 -> {
                     BubbleSelection(top.key, OmrAnswerStatus.MULTIPLE, strongMultipleCandidates.map { it.key })
                 }
-                filled.size > 1 && second != null && top.value - second.value < uncertainDelta -> {
-                    BubbleSelection(top.key, OmrAnswerStatus.UNCERTAIN, filled.map { it.key })
+                second != null && secondContrast >= minMarkedContrast && top.value - second.value < uncertainDelta -> {
+                    BubbleSelection(top.key, OmrAnswerStatus.UNCERTAIN, listOf(top.key, second.key))
                 }
                 else -> BubbleSelection(top.key, OmrAnswerStatus.OK, listOf(top.key))
             }
         }
-
         fun <T> classifyDigitColumn(
             fillRatios: Map<T, Double>,
             filledThreshold: Double = 0.35,

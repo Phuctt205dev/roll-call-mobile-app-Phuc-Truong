@@ -192,4 +192,29 @@ class BubbleDetectorTest {
         assertEquals(OmrAnswerStatus.OK, result.status)
         assertEquals("C", result.selected)
     }
+    @Test
+    fun classifyAnswerSelection_returnsBlank_whenPrintedOutlinesAreUniformlyDark() {
+        val result = BubbleDetector.classifyAnswerSelection(
+            mapOf("A" to 0.29, "B" to 0.31, "C" to 0.30, "D" to 0.32),
+            filledThreshold = 0.28,
+            blankThreshold = 0.12,
+            uncertainDelta = 0.08
+        )
+
+        assertEquals(OmrAnswerStatus.BLANK, result.status)
+        assertNull(result.selected)
+    }
+
+    @Test
+    fun classifyAnswerSelection_returnsAnswer_whenWholeRowIsDarkerButOneBubbleDominates() {
+        val result = BubbleDetector.classifyAnswerSelection(
+            mapOf("A" to 0.30, "B" to 0.32, "C" to 0.51, "D" to 0.33),
+            filledThreshold = 0.28,
+            blankThreshold = 0.12,
+            uncertainDelta = 0.08
+        )
+
+        assertEquals(OmrAnswerStatus.OK, result.status)
+        assertEquals("C", result.selected)
+    }
 }

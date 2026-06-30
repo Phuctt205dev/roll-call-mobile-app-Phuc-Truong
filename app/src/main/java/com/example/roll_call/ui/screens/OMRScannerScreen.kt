@@ -15,6 +15,7 @@ import androidx.camera.core.CameraSelector
 import androidx.camera.core.ImageCapture
 import androidx.camera.core.ImageCaptureException
 import androidx.camera.core.ImageProxy
+import androidx.camera.view.CameraController
 import androidx.camera.view.LifecycleCameraController
 import androidx.camera.view.PreviewView
 import androidx.compose.foundation.Canvas
@@ -86,8 +87,10 @@ import com.example.roll_call.ui.viewmodel.OmrRealtimeResult
 import com.example.roll_call.ui.viewmodel.OmrScannerViewModel
 import java.io.ByteArrayOutputStream
 import java.util.Locale
-import java.util.concurrent.Executors
+import kotlin.math.max
 
+
+private const val MAX_CAPTURE_DECODE_SIDE = 2600
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun OMRScannerScreen(
@@ -103,7 +106,6 @@ fun OMRScannerScreen(
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
     val uiState by viewModel.uiState.collectAsState()
-    val analysisExecutor = remember { Executors.newSingleThreadExecutor() }
     var localError by remember { mutableStateOf<String?>(null) }
 
     var hasCameraPermission by remember {
@@ -122,17 +124,8 @@ fun OMRScannerScreen(
     val cameraController = remember {
         LifecycleCameraController(context).apply {
             cameraSelector = CameraSelector.DEFAULT_BACK_CAMERA
-            setImageAnalysisAnalyzer(analysisExecutor) { imageProxy ->
-                if (!viewModel.shouldAnalyzeRealtimeFrame()) {
-                    imageProxy.close()
-                    return@setImageAnalysisAnalyzer
-                }
-                val bitmap = imageProxyToBitmap(imageProxy)
-                imageProxy.close()
-                if (bitmap != null) {
-                    viewModel.processRealtimeBitmap(bitmap, context.cacheDir.resolve("omr_debug"))
-                }
-            }
+            setEnabledUseCases(CameraController.IMAGE_CAPTURE)
+            imageCaptureMode = ImageCapture.CAPTURE_MODE_MINIMIZE_LATENCY
         }
     }
 
@@ -169,16 +162,11 @@ fun OMRScannerScreen(
         onDispose { cameraController.unbind() }
     }
 
-    DisposableEffect(Unit) {
-        onDispose {
-            cameraController.clearImageAnalysisAnalyzer()
-            analysisExecutor.shutdown()
-        }
-    }
+
 
     val statusColor = when {
         uiState.error != null || localError != null -> EduRed
-        uiState.isSheetInFrame -> EduGreen
+        uiState.latestResult?.isComplete == true -> EduGreen
         else -> EduOrange
     }
 
@@ -268,7 +256,7 @@ fun OMRScannerScreen(
             ) {
                 Icon(Icons.Default.CameraAlt, null, modifier = Modifier.size(20.dp))
                 Spacer(Modifier.width(8.dp))
-                Text(if (uiState.isScanPaused || uiState.latestResult != null) "Qu\u00e9t ti\u1ebfp" else "Ch\u1ee5p ngay")
+                Text(if (uiState.isScanPaused || uiState.latestResult != null) "Ch\u1ee5p b\u00e0i ti\u1ebfp theo" else "Ch\u1ee5p ngay")
             }
         }
     }
@@ -408,33 +396,66 @@ private fun imageProxyToBitmap(imageProxy: ImageProxy): Bitmap? {
                 val buffer = imageProxy.planes[0].buffer
                 val bytes = ByteArray(buffer.remaining())
                 buffer.get(bytes)
-                BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+                decodeSampledBitmap(bytes, MAX_CAPTURE_DECODE_SIDE)
             }
             PixelFormat.RGBA_8888 -> {
                 val plane = imageProxy.planes[0]
                 val buffer = plane.buffer
                 Bitmap.createBitmap(imageProxy.width, imageProxy.height, Bitmap.Config.ARGB_8888).apply {
                     copyPixelsFromBuffer(buffer)
-                }
+                }.scaleDownIfNeeded(MAX_CAPTURE_DECODE_SIDE)
             }
             ImageFormat.YUV_420_888 -> {
                 val nv21 = yuv420ToNv21(imageProxy)
                 val yuvImage = YuvImage(nv21, ImageFormat.NV21, imageProxy.width, imageProxy.height, null)
                 val out = ByteArrayOutputStream()
-                yuvImage.compressToJpeg(Rect(0, 0, imageProxy.width, imageProxy.height), 90, out)
-                val bytes = out.toByteArray()
-                BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+                yuvImage.compressToJpeg(Rect(0, 0, imageProxy.width, imageProxy.height), 86, out)
+                decodeSampledBitmap(out.toByteArray(), MAX_CAPTURE_DECODE_SIDE)
             }
             else -> null
         } ?: return null
 
         val rotation = imageProxy.imageInfo.rotationDegrees
-        if (rotation == 0) bitmap else {
+        if (rotation == 0) {
+            bitmap
+        } else {
             val matrix = Matrix().apply { postRotate(rotation.toFloat()) }
-            Bitmap.createBitmap(bitmap, 0, 0, bitmap.width, bitmap.height, matrix, true)
+            Bitmap.createBitmap(bitmap, 0, 0, bitmap.width, bitmap.height, matrix, true).also {
+                if (it !== bitmap) bitmap.recycle()
+            }
         }
     } catch (_: Exception) {
         null
+    }
+}
+
+private fun decodeSampledBitmap(bytes: ByteArray, maxSide: Int): Bitmap? {
+    val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+    BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
+    val longestSide = max(bounds.outWidth, bounds.outHeight)
+    val sampleSize = if (longestSide <= 0) {
+        1
+    } else {
+        var sample = 1
+        while (longestSide / sample > maxSide) sample *= 2
+        sample
+    }
+    val options = BitmapFactory.Options().apply {
+        inSampleSize = sampleSize
+        inPreferredConfig = Bitmap.Config.ARGB_8888
+    }
+    return BitmapFactory.decodeByteArray(bytes, 0, bytes.size, options)
+        ?.scaleDownIfNeeded(maxSide)
+}
+
+private fun Bitmap.scaleDownIfNeeded(maxSide: Int): Bitmap {
+    val longestSide = max(width, height)
+    if (longestSide <= maxSide) return this
+    val scale = maxSide.toFloat() / longestSide.toFloat()
+    val targetWidth = (width * scale).toInt().coerceAtLeast(1)
+    val targetHeight = (height * scale).toInt().coerceAtLeast(1)
+    return Bitmap.createScaledBitmap(this, targetWidth, targetHeight, true).also {
+        if (it !== this) recycle()
     }
 }
 
@@ -473,7 +494,6 @@ private fun yuv420ToNv21(imageProxy: ImageProxy): ByteArray {
 
     return nv21
 }
-
 private fun formatScore(value: Double): String {
     return if (value % 1.0 == 0.0) {
         value.toInt().toString()

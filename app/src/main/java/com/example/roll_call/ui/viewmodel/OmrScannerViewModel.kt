@@ -5,14 +5,10 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.roll_call.data.repository.OmrRepository
 import com.example.roll_call.domain.model.Student
-import com.example.roll_call.domain.model.omr.FixedOmrTemplate
-import com.example.roll_call.domain.model.omr.OmrAnswerStatus
 import com.example.roll_call.domain.model.omr.OmrGrade
 import com.example.roll_call.domain.model.omr.OmrPrintVersion
-import com.example.roll_call.domain.model.omr.OmrQuestionAnswer
 import com.example.roll_call.domain.model.omr.OmrScanResult
 import com.example.roll_call.domain.omr.OmrGrader
-import com.example.roll_call.utils.omr.BubbleDetector
 import com.example.roll_call.utils.omr.OmrProcessor
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -21,6 +17,8 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.opencv.android.OpenCVLoader
 import java.io.File
+import kotlin.math.max
+import kotlin.math.roundToInt
 
 data class OmrRealtimeResult(
     val scanResult: OmrScanResult,
@@ -58,14 +56,6 @@ class OmrScannerViewModel : ViewModel() {
     val uiState: StateFlow<OmrScannerUiState> = _uiState
 
     private var openCvReady = false
-    private var realtimeProcessing = false
-    private var lastRealtimeAttemptMs = 0L
-    private var stableFrameCount = 0
-    private var lastAcceptedSignature: String? = null
-    private var lastAcceptedAtMs = 0L
-    private var lastValidIdentity: String? = null
-    private var validFrameCount = 0
-    private val validFrameResults = mutableListOf<OmrScanResult>()
 
     private var initializedKey: String? = null
     private var classId: String = ""
@@ -93,7 +83,6 @@ class OmrScannerViewModel : ViewModel() {
         this.preferredVersionId = normalizedVersionId
         this.printVersions = emptyList()
         this.studentCache.clear()
-        resetRealtimeTracking()
 
         _uiState.value = OmrScannerUiState(
             isInitializing = true,
@@ -123,61 +112,12 @@ class OmrScannerViewModel : ViewModel() {
             )
         }
     }
-
-    fun shouldAnalyzeRealtimeFrame(): Boolean {
-        val now = System.currentTimeMillis()
-        val state = _uiState.value
-        return !realtimeProcessing &&
-            !state.isInitializing &&
-            !state.isScanPaused &&
-            state.latestResult == null &&
-            now - lastRealtimeAttemptMs >= REALTIME_INTERVAL_MS
-    }
-
-    fun processRealtimeBitmap(bitmap: Bitmap, cacheDir: File?) {
-        if (!shouldAnalyzeRealtimeFrame()) return
-        realtimeProcessing = true
-        lastRealtimeAttemptMs = System.currentTimeMillis()
-
-        viewModelScope.launch {
-            try {
-                if (!ensureOpenCv()) {
-                    _uiState.value = _uiState.value.copy(
-                        realtimeStatus = "Kh\u00f4ng kh\u1edfi t\u1ea1o \u0111\u01b0\u1ee3c OpenCV",
-                        isSheetInFrame = false
-                    )
-                    return@launch
-                }
-
-                val quickResult = runCatching {
-                    withContext(Dispatchers.Default) {
-                        OmrProcessor(debugEnabled = false).process(bitmap)
-                    }
-                }
-
-                quickResult.fold(
-                    onSuccess = { result -> handleRealtimeCandidate(result, bitmap, cacheDir) },
-                    onFailure = { error ->
-                        resetRealtimeTracking()
-                        _uiState.value = _uiState.value.copy(
-                            realtimeStatus = error.message ?: "\u0110ang t\u00ecm phi\u1ebfu trong khung",
-                            stableFrameCount = 0,
-                            isSheetInFrame = false
-                        )
-                    }
-                )
-            } finally {
-                realtimeProcessing = false
-            }
-        }
-    }
-
     fun processCapturedBitmap(bitmap: Bitmap, cacheDir: File?) {
         viewModelScope.launch {
             _uiState.value = _uiState.value.copy(
                 isProcessing = true,
                 error = null,
-                realtimeStatus = "\u0110ang x\u1eed l\u00fd phi\u1ebfu",
+                realtimeStatus = "\u0110ang x\u1eed l\u00fd \u1ea3nh ch\u1ee5p",
                 isScanPaused = true
             )
             if (!ensureOpenCv()) {
@@ -189,17 +129,26 @@ class OmrScannerViewModel : ViewModel() {
                 return@launch
             }
 
-            val quickResult = runCatching {
+            val debugCorrectAnswers = initialDebugCorrectAnswers()
+            val scanResult = runCatching {
                 withContext(Dispatchers.Default) {
-                    OmrProcessor(debugEnabled = false).process(bitmap)
+                    val processingBitmap = bitmap.scaleForOmrProcessing(MAX_CAPTURE_PROCESSING_SIDE)
+                    try {
+                        OmrProcessor(
+                            debugCacheDir = cacheDir,
+                            debugEnabled = true,
+                            correctAnswers = debugCorrectAnswers
+                        ).process(processingBitmap)
+                    } finally {
+                        if (processingBitmap !== bitmap) processingBitmap.recycle()
+                    }
                 }
             }
 
-            quickResult.fold(
+            scanResult.fold(
                 onSuccess = { scan ->
                     val validation = validateScan(scan)
                     if (!validation.isComplete) {
-                        resetRealtimeTracking()
                         _uiState.value = _uiState.value.copy(
                             isProcessing = false,
                             latestResult = null,
@@ -212,23 +161,11 @@ class OmrScannerViewModel : ViewModel() {
                         return@fold
                     }
 
-                    val finalScan = runCatching {
-                        withContext(Dispatchers.Default) {
-                            OmrProcessor(
-                                debugCacheDir = cacheDir,
-                                debugEnabled = true,
-                                correctAnswers = validation.answerKey!!.answers
-                            ).process(bitmap)
-                        }
-                    }.getOrElse { scan }.copy(
-                        examCode = scan.examCode,
-                        studentCode = scan.studentCode
-                    )
-                    val realtimeResult = buildRealtimeResult(finalScan, validation.answerKey, validation.student)
+                    val result = buildRealtimeResult(scan, validation.answerKey, validation.student)
                     _uiState.value = _uiState.value.copy(
                         isProcessing = false,
-                        latestResult = realtimeResult,
-                        realtimeStatus = realtimeResult.message,
+                        latestResult = result,
+                        realtimeStatus = result.message,
                         isSheetInFrame = true,
                         isScanPaused = true,
                         error = null
@@ -255,9 +192,6 @@ class OmrScannerViewModel : ViewModel() {
     }
 
     private fun resumeScanning(clearStudentCache: Boolean) {
-        resetRealtimeTracking()
-        lastAcceptedSignature = null
-        lastAcceptedAtMs = 0L
         if (clearStudentCache) studentCache.clear()
         _uiState.value = _uiState.value.copy(
             latestResult = null,
@@ -299,100 +233,6 @@ class OmrScannerViewModel : ViewModel() {
             )
         }
     }
-
-    private suspend fun handleRealtimeCandidate(result: OmrScanResult, bitmap: Bitmap, cacheDir: File?) {
-        val sheetVisible = result.debugInfo.markerCount >= MIN_MARKERS_FOR_SHEET
-        if (!isRealtimeCandidate(result)) {
-            resetRealtimeTracking(keepSheetFrames = sheetVisible)
-            _uiState.value = _uiState.value.copy(
-                realtimeStatus = candidateMessage(result),
-                stableFrameCount = if (sheetVisible) stableFrameCount else 0,
-                isSheetInFrame = sheetVisible,
-                isScanPaused = false
-            )
-            return
-        }
-
-        val validation = validateScan(result)
-        if (!validation.isComplete) {
-            resetRealtimeTracking()
-            _uiState.value = _uiState.value.copy(
-                latestResult = null,
-                realtimeStatus = validation.message,
-                stableFrameCount = 0,
-                isSheetInFrame = true,
-                isScanPaused = false,
-                error = null
-            )
-            return
-        }
-
-        val identity = validIdentity(validation)
-        if (identity != lastValidIdentity) {
-            validFrameResults.clear()
-        }
-        validFrameResults += result
-        while (validFrameResults.size > MAX_VALID_FRAME_BUFFER) {
-            validFrameResults.removeAt(0)
-        }
-        validFrameCount = validFrameResults.size
-        lastValidIdentity = identity
-        stableFrameCount = validFrameCount
-
-        if (validFrameCount < REQUIRED_VALID_FRAMES) {
-            _uiState.value = _uiState.value.copy(
-                realtimeStatus = "\u0110\u00e3 kh\u1edbp m\u00e3 \u0111\u1ec1/SBD (${validFrameCount}/${REQUIRED_VALID_FRAMES})",
-                stableFrameCount = validFrameCount,
-                isSheetInFrame = true,
-                isScanPaused = false,
-                error = null
-            )
-            return
-        }
-
-        val signature = resultSignature(result)
-        val now = System.currentTimeMillis()
-        if (signature == lastAcceptedSignature && now - lastAcceptedAtMs < DUPLICATE_RESULT_COOLDOWN_MS) {
-            _uiState.value = _uiState.value.copy(
-                realtimeStatus = _uiState.value.latestResult?.message ?: "\u0110\u00e3 nh\u1eadn di\u1ec7n phi\u1ebfu",
-                stableFrameCount = validFrameCount,
-                isSheetInFrame = true,
-                isScanPaused = true
-            )
-            return
-        }
-
-        val votedAnswers = voteAnswers(validFrameResults)
-        val finalResult = runCatching {
-            withContext(Dispatchers.Default) {
-                OmrProcessor(
-                    debugCacheDir = cacheDir,
-                    debugEnabled = true,
-                    correctAnswers = validation.answerKey!!.answers,
-                    debugAnswersOverride = votedAnswers
-                ).process(bitmap)
-            }
-        }.getOrElse { result }.copy(
-            examCode = result.examCode,
-            studentCode = result.studentCode,
-            answers = votedAnswers,
-            confidence = averageConfidence(validFrameResults)
-        )
-
-        val realtimeResult = buildRealtimeResult(finalResult, validation.answerKey, validation.student)
-        lastAcceptedSignature = signature
-        lastAcceptedAtMs = now
-
-        _uiState.value = _uiState.value.copy(
-            latestResult = realtimeResult,
-            realtimeStatus = realtimeResult.message,
-            stableFrameCount = validFrameCount,
-            isSheetInFrame = true,
-            isScanPaused = true,
-            error = null
-        )
-    }
-
     private suspend fun buildRealtimeResult(
         scanResult: OmrScanResult,
         answerKeyOverride: OmrPrintVersion? = null,
@@ -452,73 +292,6 @@ class OmrScannerViewModel : ViewModel() {
             message = "\u0110\u00e3 kh\u1edbp m\u00e3 \u0111\u1ec1/SBD"
         )
     }
-
-    private fun validIdentity(validation: ScanValidation): String {
-        val answerKey = validation.answerKey
-        val student = validation.student
-        return "${answerKey?.id.orEmpty()}|${student?.id ?: student?.studentCode.orEmpty()}"
-    }
-
-    private fun voteAnswers(results: List<OmrScanResult>): List<OmrQuestionAnswer> {
-        val answersByQuestion = results
-            .flatMap { it.answers }
-            .groupBy { it.questionNumber }
-        val template = FixedOmrTemplate.default
-
-        return answersByQuestion.keys.sorted().map { question ->
-            val frames = answersByQuestion[question].orEmpty()
-            val averagedRatios = averagedRatios(frames)
-            val majorityAnswer = majorityOkAnswer(frames)
-            val selection = BubbleDetector.classifySelection(
-                fillRatios = averagedRatios,
-                filledThreshold = template.filledThreshold,
-                blankThreshold = template.blankThreshold,
-                uncertainDelta = template.uncertainDelta,
-                allowSoftSelection = true
-            )
-            val selected = majorityAnswer ?: selection.selected
-            val status = if (majorityAnswer != null) OmrAnswerStatus.OK else selection.status
-            OmrQuestionAnswer(
-                questionNumber = question,
-                answer = selected,
-                status = status,
-                fillRatios = averagedRatios
-            )
-        }
-    }
-
-    private fun averagedRatios(frames: List<OmrQuestionAnswer>): Map<String, Double> {
-        val template = FixedOmrTemplate.default
-        return ANSWER_OPTIONS.associateWith { option ->
-            frames.map { answer ->
-                answer.fillRatios[option]
-                    ?: if (answer.status == OmrAnswerStatus.OK && OmrGrader.normalizeAnswer(answer.answer) == option) {
-                        template.filledThreshold
-                    } else {
-                        0.0
-                    }
-            }.average().takeIf { !it.isNaN() } ?: 0.0
-        }
-    }
-
-    private fun majorityOkAnswer(frames: List<OmrQuestionAnswer>): String? {
-        val counts = frames
-            .mapNotNull { answer ->
-                if (answer.status == OmrAnswerStatus.OK) OmrGrader.normalizeAnswer(answer.answer) else null
-            }
-            .groupingBy { it }
-            .eachCount()
-        val ranked = counts.entries.sortedByDescending { it.value }
-        val top = ranked.firstOrNull() ?: return null
-        val secondCount = ranked.drop(1).firstOrNull()?.value ?: 0
-        val requiredCount = ((frames.size + 1) / 2).coerceAtLeast(1)
-        return if (top.value >= requiredCount && top.value > secondCount) top.key else null
-    }
-
-    private fun averageConfidence(results: List<OmrScanResult>): Double {
-        return results.map { it.confidence }.average().takeIf { !it.isNaN() }?.coerceIn(0.0, 1.0) ?: 0.0
-    }
-
     private suspend fun findStudent(studentCode: String): Student? {
         val key = studentCode.filter { it.isDigit() }
         if (key.isBlank()) return null
@@ -527,56 +300,27 @@ class OmrScannerViewModel : ViewModel() {
         studentCache[key] = student
         return student
     }
-
-    private fun isRealtimeCandidate(result: OmrScanResult): Boolean {
-        val examDigits = result.examCode.filter { it.isDigit() }
-        val studentDigits = result.studentCode.filter { it.isDigit() }
-        return result.debugInfo.markerCount >= MIN_MARKERS_FOR_SHEET &&
-            result.confidence >= MIN_REALTIME_CONFIDENCE &&
-            examDigits.length == 3 &&
-            studentDigits.length == 6 &&
-            '?' !in result.examCode &&
-            '?' !in result.studentCode
-    }
-
-    private fun candidateMessage(result: OmrScanResult): String {
-        val examDigits = result.examCode.filter { it.isDigit() }
-        val studentDigits = result.studentCode.filter { it.isDigit() }
-        return when {
-            result.debugInfo.markerCount < MIN_MARKERS_FOR_SHEET -> "C\u0103n 4 \u00f4 vu\u00f4ng \u0111en v\u00e0o 4 g\u00f3c khung"
-            examDigits.length != 3 || '?' in result.examCode -> "Ch\u01b0a \u0111\u1ecdc r\u00f5 m\u00e3 \u0111\u1ec1"
-            studentDigits.length != 6 || '?' in result.studentCode -> "Ch\u01b0a \u0111\u1ecdc r\u00f5 s\u1ed1 b\u00e1o danh"
-            result.confidence < MIN_REALTIME_CONFIDENCE -> "Gi\u1eef phi\u1ebfu ph\u1eb3ng v\u00e0 \u0111\u1ee7 s\u00e1ng"
-            else -> "\u0110ang \u0111\u1ecdc phi\u1ebfu"
+    private fun initialDebugCorrectAnswers(): Map<String, String> {
+        preferredVersionId?.let { preferredId ->
+            printVersions.firstOrNull { it.id == preferredId }?.let { return it.answers }
         }
+        return if (printVersions.size == 1) printVersions.first().answers else emptyMap()
     }
 
-    private fun resultSignature(result: OmrScanResult): String {
-        val answersSignature = result.answers.joinToString(separator = ",") { answer ->
-            "${answer.questionNumber}:${answer.answer ?: answer.status.name}"
-        }
-        return "${OmrGrader.normalizeExamCode(result.examCode)}|${result.studentCode.filter { it.isDigit() }}|$answersSignature"
+    private fun Bitmap.scaleForOmrProcessing(maxSide: Int): Bitmap {
+        val longestSide = max(width, height)
+        if (longestSide <= maxSide) return this
+        val scale = maxSide.toFloat() / longestSide.toFloat()
+        val targetWidth = (width * scale).roundToInt().coerceAtLeast(1)
+        val targetHeight = (height * scale).roundToInt().coerceAtLeast(1)
+        return Bitmap.createScaledBitmap(this, targetWidth, targetHeight, true)
     }
-
-    private fun resetRealtimeTracking(keepSheetFrames: Boolean = false) {
-        if (!keepSheetFrames) stableFrameCount = 0
-        lastValidIdentity = null
-        validFrameCount = 0
-        validFrameResults.clear()
-    }
-
     private fun ensureOpenCv(): Boolean {
         if (!openCvReady) openCvReady = OpenCVLoader.initDebug()
         return openCvReady
     }
 
     companion object {
-        private const val REALTIME_INTERVAL_MS = 700L
-        private const val MIN_MARKERS_FOR_SHEET = 4
-        private const val REQUIRED_VALID_FRAMES = 4
-        private const val MIN_REALTIME_CONFIDENCE = 0.32
-        private const val DUPLICATE_RESULT_COOLDOWN_MS = 2200L
-        private const val MAX_VALID_FRAME_BUFFER = 6
-        private val ANSWER_OPTIONS = listOf("A", "B", "C", "D")
+        private const val MAX_CAPTURE_PROCESSING_SIDE = 2200
     }
 }

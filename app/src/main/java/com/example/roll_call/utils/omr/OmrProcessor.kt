@@ -387,10 +387,13 @@ class OmrProcessor(
             template.studentIdColumns.flatMap { it.bubblesByDigit.values }.forEach { bubble ->
                 drawBubble(overlay, bubble.centerX, bubble.centerY, bubble.radius, COLOR_CODE_BUBBLE)
             }
-            template.answerRows.forEach { row ->
+            val includedQuestions = questionNumbersWithAnswerKey(correctAnswers)
+            template.answerRows
+                .filter { includedQuestions.isEmpty() || it.questionNumber in includedQuestions }
+                .forEach { row ->
                 val answer = answers.firstOrNull { it.questionNumber == row.questionNumber }
                 val selected = answer?.answer?.uppercase()
-                val correct = correctAnswers[row.questionNumber.toString()]?.trim()?.uppercase()
+                val correct = correctAnswerFor(row.questionNumber, correctAnswers)
                 val isBlank = selected.isNullOrBlank() || answer?.status == OmrAnswerStatus.BLANK
                 val multipleOptions = if (answer?.status == OmrAnswerStatus.MULTIPLE && answer.fillRatios.isNotEmpty()) {
                     bubbleDetector.classifyAnswerSelection(answer.fillRatios)
@@ -424,6 +427,21 @@ class OmrProcessor(
         }
     }
 
+
+    private fun questionNumbersWithAnswerKey(correctAnswers: Map<String, String>): Set<Int> {
+        return correctAnswers.keys
+            .mapNotNull { key -> key.filter { it.isDigit() }.toIntOrNull() }
+            .filter { it > 0 }
+            .toSet()
+    }
+
+    private fun correctAnswerFor(questionNumber: Int, correctAnswers: Map<String, String>): String? {
+        return correctAnswers.entries
+            .firstOrNull { (key, _) -> key.filter { it.isDigit() }.toIntOrNull() == questionNumber }
+            ?.value
+            ?.trim()
+            ?.uppercase()
+    }
     private fun drawBubble(mat: Mat, x: Float, y: Float, radius: Float, color: Scalar) {
         Imgproc.circle(mat, Point(x.toDouble(), y.toDouble()), radius.toInt(), color, 2)
     }

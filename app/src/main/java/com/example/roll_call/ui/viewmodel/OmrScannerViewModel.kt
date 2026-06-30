@@ -193,8 +193,10 @@ class OmrScannerViewModel : ViewModel() {
                         return@fold
                     }
 
-                    val scanWithDebug = attachColoredDebugOverlay(scan, bitmap, cacheDir, validation.answerKey!!)
-                    val result = buildRealtimeResult(scanWithDebug, validation.answerKey, validation.student)
+                    val answerKey = validation.answerKey!!
+                    val limitedScan = scan.limitAnswersTo(answerKey)
+                    val scanWithDebug = attachColoredDebugOverlay(limitedScan, bitmap, cacheDir, answerKey)
+                    val result = buildRealtimeResult(scanWithDebug, answerKey, validation.student)
                     _uiState.value = _uiState.value.copy(
                         isProcessing = false,
                         latestResult = result,
@@ -272,33 +274,34 @@ class OmrScannerViewModel : ViewModel() {
         studentOverride: Student? = null
     ): OmrRealtimeResult {
         val selectedAnswerKey = answerKeyOverride ?: OmrGrader.selectAnswerKey(printVersions, scanResult.examCode, preferredVersionId)
-        val student = studentOverride ?: findStudent(scanResult.studentCode)
+        val gradingScanResult = selectedAnswerKey?.let { scanResult.limitAnswersTo(it) } ?: scanResult
+        val student = studentOverride ?: findStudent(gradingScanResult.studentCode)
         val teacherId = repository.currentTeacherId
         val grade = if (selectedAnswerKey != null && teacherId != null) {
             OmrGrader.gradeAnswers(
-                scanResult = scanResult,
+                scanResult = gradingScanResult,
                 answerKey = selectedAnswerKey,
                 classId = classId,
                 examId = examId,
                 classExamInstanceId = classExamInstanceId,
                 teacherId = teacherId,
                 studentId = student?.id,
-                studentCodeOverride = student?.studentCode ?: scanResult.studentCode,
-                examCodeOverride = scanResult.examCode
+                studentCodeOverride = student?.studentCode ?: gradingScanResult.studentCode,
+                examCodeOverride = gradingScanResult.examCode
             )
         } else {
             null
         }
 
         val message = when {
-            selectedAnswerKey == null -> "Ch\u01b0a kh\u1edbp m\u00e3 \u0111\u1ec1 ${scanResult.examCode}, ti\u1ebfp t\u1ee5c qu\u00e9t"
-            student == null -> "Ch\u01b0a kh\u1edbp SBD ${scanResult.studentCode}, ti\u1ebfp t\u1ee5c qu\u00e9t"
+            selectedAnswerKey == null -> "Ch\u01b0a kh\u1edbp m\u00e3 \u0111\u1ec1 ${gradingScanResult.examCode}, ti\u1ebfp t\u1ee5c qu\u00e9t"
+            student == null -> "Ch\u01b0a kh\u1edbp SBD ${gradingScanResult.studentCode}, ti\u1ebfp t\u1ee5c qu\u00e9t"
             grade != null -> "${student.name} - ${grade.score}/${grade.maxScore}"
             else -> "\u0110\u00e3 nh\u1eadn di\u1ec7n phi\u1ebfu"
         }
 
         return OmrRealtimeResult(
-            scanResult = scanResult,
+            scanResult = gradingScanResult,
             student = student,
             grade = grade,
             message = message,
@@ -363,6 +366,34 @@ class OmrScannerViewModel : ViewModel() {
         return student
     }
 
+
+    private fun OmrScanResult.limitAnswersTo(answerKey: OmrPrintVersion): OmrScanResult {
+        val totalQuestions = resolveQuestionLimit(answerKey)
+        if (totalQuestions <= 0) return this
+        val allowedQuestions = (1..totalQuestions).toSet()
+        return copy(
+            answers = answers.filter { it.questionNumber in allowedQuestions },
+            warnings = warnings.filterNot { warning ->
+                val questionNumber = WARNING_QUESTION_REGEX.find(warning)
+                    ?.groupValues
+                    ?.getOrNull(1)
+                    ?.toIntOrNull()
+                questionNumber != null && questionNumber !in allowedQuestions
+            }
+        )
+    }
+
+    private fun resolveQuestionLimit(answerKey: OmrPrintVersion): Int {
+        val maxQuestionFromAnswers = answerKey.answers.keys
+            .mapNotNull { key -> key.filter { it.isDigit() }.toIntOrNull() }
+            .maxOrNull()
+            ?: 0
+        return when {
+            answerKey.totalQuestions > 0 && maxQuestionFromAnswers > 0 -> minOf(answerKey.totalQuestions, maxQuestionFromAnswers)
+            answerKey.totalQuestions > 0 -> answerKey.totalQuestions
+            else -> maxQuestionFromAnswers
+        }
+    }
     private fun Bitmap.scaleForOmrProcessing(maxSide: Int): Bitmap {
         val longestSide = max(width, height)
         if (longestSide <= maxSide) return this
@@ -379,6 +410,7 @@ class OmrScannerViewModel : ViewModel() {
 
     companion object {
         private const val MAX_CAPTURE_PROCESSING_SIDE = 2200
+        private val WARNING_QUESTION_REGEX = Regex("^C\\D+(\\d+):")
         private const val ALIGNMENT_INTERVAL_MS = 900L
     }
 }

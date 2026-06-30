@@ -129,16 +129,11 @@ class OmrScannerViewModel : ViewModel() {
                 return@launch
             }
 
-            val debugCorrectAnswers = initialDebugCorrectAnswers()
             val scanResult = runCatching {
                 withContext(Dispatchers.Default) {
                     val processingBitmap = bitmap.scaleForOmrProcessing(MAX_CAPTURE_PROCESSING_SIDE)
                     try {
-                        OmrProcessor(
-                            debugCacheDir = cacheDir,
-                            debugEnabled = true,
-                            correctAnswers = debugCorrectAnswers
-                        ).process(processingBitmap)
+                        OmrProcessor(debugEnabled = false).process(processingBitmap)
                     } finally {
                         if (processingBitmap !== bitmap) processingBitmap.recycle()
                     }
@@ -161,7 +156,8 @@ class OmrScannerViewModel : ViewModel() {
                         return@fold
                     }
 
-                    val result = buildRealtimeResult(scan, validation.answerKey, validation.student)
+                    val scanWithDebug = attachColoredDebugOverlay(scan, bitmap, cacheDir, validation.answerKey!!)
+                    val result = buildRealtimeResult(scanWithDebug, validation.answerKey, validation.student)
                     _uiState.value = _uiState.value.copy(
                         isProcessing = false,
                         latestResult = result,
@@ -272,7 +268,35 @@ class OmrScannerViewModel : ViewModel() {
             isComplete = selectedAnswerKey != null && student != null && grade != null
         )
     }
-
+    private suspend fun attachColoredDebugOverlay(
+        scanResult: OmrScanResult,
+        bitmap: Bitmap,
+        cacheDir: File?,
+        answerKey: OmrPrintVersion
+    ): OmrScanResult {
+        val debugPath = withContext(Dispatchers.Default) {
+            val processingBitmap = bitmap.scaleForOmrProcessing(MAX_CAPTURE_PROCESSING_SIDE)
+            try {
+                OmrProcessor(
+                    debugCacheDir = cacheDir,
+                    debugEnabled = true
+                ).createDebugOverlay(
+                    bitmap = processingBitmap,
+                    answers = scanResult.answers,
+                    correctAnswers = answerKey.answers
+                )
+            } finally {
+                if (processingBitmap !== bitmap) processingBitmap.recycle()
+            }
+        }
+        return if (debugPath.isNullOrBlank()) {
+            scanResult
+        } else {
+            scanResult.copy(
+                debugInfo = scanResult.debugInfo.copy(debugOverlayPath = debugPath)
+            )
+        }
+    }
     private suspend fun validateScan(scanResult: OmrScanResult): ScanValidation {
         val selectedAnswerKey = OmrGrader.selectAnswerKey(printVersions, scanResult.examCode, preferredVersionId)
             ?: return ScanValidation(
@@ -292,6 +316,7 @@ class OmrScannerViewModel : ViewModel() {
             message = "\u0110\u00e3 kh\u1edbp m\u00e3 \u0111\u1ec1/SBD"
         )
     }
+
     private suspend fun findStudent(studentCode: String): Student? {
         val key = studentCode.filter { it.isDigit() }
         if (key.isBlank()) return null
@@ -299,12 +324,6 @@ class OmrScannerViewModel : ViewModel() {
         val student = repository.findStudentByCode(classId, key).getOrNull()
         studentCache[key] = student
         return student
-    }
-    private fun initialDebugCorrectAnswers(): Map<String, String> {
-        preferredVersionId?.let { preferredId ->
-            printVersions.firstOrNull { it.id == preferredId }?.let { return it.answers }
-        }
-        return if (printVersions.size == 1) printVersions.first().answers else emptyMap()
     }
 
     private fun Bitmap.scaleForOmrProcessing(maxSide: Int): Bitmap {
@@ -315,6 +334,7 @@ class OmrScannerViewModel : ViewModel() {
         val targetHeight = (height * scale).roundToInt().coerceAtLeast(1)
         return Bitmap.createScaledBitmap(this, targetWidth, targetHeight, true)
     }
+
     private fun ensureOpenCv(): Boolean {
         if (!openCvReady) openCvReady = OpenCVLoader.initDebug()
         return openCvReady

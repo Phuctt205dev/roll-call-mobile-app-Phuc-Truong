@@ -84,7 +84,32 @@ class OmrProcessor(
         release(source, preprocessed.gray, preprocessed.binaryInverse, warped, warpedPreprocessed.gray, warpedPreprocessed.binaryInverse)
         return result
     }
-
+    fun createDebugOverlay(
+        bitmap: Bitmap,
+        answers: List<OmrQuestionAnswer>,
+        correctAnswers: Map<String, String>
+    ): String? {
+        if (!debugEnabled || debugCacheDir == null) return null
+        val source = Mat()
+        return try {
+            Utils.bitmapToMat(bitmap, source)
+            val preprocessed = preprocessImage(source)
+            val markers = detectSheetMarkers(preprocessed.binaryInverse)
+            if (markers.size < 4) {
+                release(preprocessed.gray, preprocessed.binaryInverse)
+                null
+            } else {
+                val warped = perspectiveCorrection(source, markers)
+                val debugPath = saveDebugOverlay(warped, answers, correctAnswers)
+                release(preprocessed.gray, preprocessed.binaryInverse, warped)
+                debugPath
+            }
+        } catch (_: Exception) {
+            null
+        } finally {
+            release(source)
+        }
+    }
     fun preprocessImage(input: Mat): PreprocessedImage {
         val gray = Mat()
         if (input.channels() == 1) {
@@ -333,7 +358,11 @@ class OmrProcessor(
         return (template.warpedWidth - MARKER_TARGET_LEFT * 2.0) / (MARKER_TARGET_BOTTOM - MARKER_TARGET_TOP)
     }
 
-    private fun saveDebugOverlay(warped: Mat, answers: List<OmrQuestionAnswer>): String? {
+    private fun saveDebugOverlay(
+        warped: Mat,
+        answers: List<OmrQuestionAnswer>,
+        correctAnswers: Map<String, String> = this.correctAnswers
+    ): String? {
         val dir = debugCacheDir ?: return null
         return try {
             if (!dir.exists()) dir.mkdirs()

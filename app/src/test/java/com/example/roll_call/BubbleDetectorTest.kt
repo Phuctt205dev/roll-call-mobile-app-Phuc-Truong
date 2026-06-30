@@ -38,4 +38,52 @@ class BubbleDetectorTest {
         assertEquals(OmrAnswerStatus.UNCERTAIN, result.status)
         assertEquals("A", result.selected)
     }
+
+    @Test
+    fun classifyDigitColumn_returnsDigit_whenPrintedBubbleIsBelowAbsoluteFilledThresholdButDominant() {
+        val result = BubbleDetector.classifyDigitColumn(
+            mapOf(
+                0 to 0.05,
+                1 to 0.07,
+                2 to 0.24,
+                3 to 0.06,
+                4 to 0.08,
+                5 to 0.05,
+                6 to 0.07,
+                7 to 0.06,
+                8 to 0.08,
+                9 to 0.05,
+            ),
+            filledThreshold = 0.28,
+            blankThreshold = 0.12,
+            uncertainDelta = 0.08
+        )
+
+        assertEquals(OmrAnswerStatus.OK, result.status)
+        assertEquals(2, result.selected)
+    }
+
+    @Test
+    fun classifyDigitColumn_returnsUncertainWithBestDigit_whenPrintedColumnHasCloseCandidates() {
+        val result = BubbleDetector.classifyDigitColumn(
+            mapOf(
+                0 to 0.06,
+                1 to 0.07,
+                2 to 0.20,
+                3 to 0.18,
+                4 to 0.08,
+                5 to 0.06,
+                6 to 0.07,
+                7 to 0.06,
+                8 to 0.08,
+                9 to 0.06,
+            ),
+            filledThreshold = 0.28,
+            blankThreshold = 0.12,
+            uncertainDelta = 0.08
+        )
+
+        assertEquals(OmrAnswerStatus.UNCERTAIN, result.status)
+        assertEquals(2, result.selected)
+    }
 }

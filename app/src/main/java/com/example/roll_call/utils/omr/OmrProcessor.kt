@@ -197,7 +197,7 @@ class OmrProcessor(
             val ratios = column.bubblesByDigit.mapValues { (_, bubble) ->
                 bubbleDetector.readBubble(binaryInverse, bubble).fillRatio
             }
-            val selection = bubbleDetector.classifySelection(ratios)
+            val selection = bubbleDetector.classifyDigitColumn(ratios)
             if (selection.status != OmrAnswerStatus.OK) {
                 warnings += "$label c\u1ed9t ${column.columnIndex + 1}: ${selection.status.name}"
             }

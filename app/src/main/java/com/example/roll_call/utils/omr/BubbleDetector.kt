@@ -70,8 +70,21 @@ class BubbleDetector(
         )
     }
 
+    fun <T> classifyDigitColumn(fillRatios: Map<T, Double>): BubbleSelection<T> {
+        return classifyDigitColumn(
+            fillRatios = fillRatios,
+            filledThreshold = filledThreshold,
+            blankThreshold = blankThreshold,
+            uncertainDelta = uncertainDelta
+        )
+    }
+
     companion object {
         private const val SOFT_SELECTION_RATIO = 1.35
+        private const val DIGIT_DOMINANCE_RATIO = 1.22
+        private const val DIGIT_DELTA_FACTOR = 0.55
+        private const val DIGIT_BASELINE_DELTA_FACTOR = 0.35
+
         fun <T> classifySelection(
             fillRatios: Map<T, Double>,
             filledThreshold: Double = 0.35,
@@ -103,6 +116,51 @@ class BubbleDetector(
                     top.value >= second.value * SOFT_SELECTION_RATIO -> BubbleSelection(top.key, OmrAnswerStatus.OK, listOf(top.key))
                 top.value < blankThreshold -> BubbleSelection(null, OmrAnswerStatus.BLANK, emptyList())
                 else -> BubbleSelection(top.key, OmrAnswerStatus.UNCERTAIN, listOf(top.key))
+            }
+        }
+
+        fun <T> classifyDigitColumn(
+            fillRatios: Map<T, Double>,
+            filledThreshold: Double = 0.35,
+            blankThreshold: Double = 0.18,
+            uncertainDelta: Double = 0.08
+        ): BubbleSelection<T> {
+            if (fillRatios.isEmpty()) {
+                return BubbleSelection(null, OmrAnswerStatus.BLANK, emptyList())
+            }
+
+            val sorted = fillRatios.entries.sortedByDescending { it.value }
+            val top = sorted.first()
+            val second = sorted.drop(1).firstOrNull()
+            val values = sorted.map { it.value }.sorted()
+            val median = values[values.size / 2]
+            val secondValue = second?.value ?: 0.0
+            val minUsableRatio = maxOf(
+                blankThreshold * 0.85,
+                median + uncertainDelta * DIGIT_BASELINE_DELTA_FACTOR
+            )
+
+            if (top.value < minUsableRatio) {
+                return BubbleSelection(null, OmrAnswerStatus.BLANK, emptyList())
+            }
+
+            val delta = top.value - secondValue
+            val dominatesByDelta = second == null || delta >= uncertainDelta * DIGIT_DELTA_FACTOR
+            val dominatesByRatio = second == null ||
+                secondValue <= 0.01 ||
+                top.value >= secondValue * DIGIT_DOMINANCE_RATIO
+            val isStrong = top.value >= filledThreshold
+
+            return when {
+                isStrong && (dominatesByDelta || dominatesByRatio) -> {
+                    BubbleSelection(top.key, OmrAnswerStatus.OK, listOf(top.key))
+                }
+                dominatesByDelta && dominatesByRatio -> {
+                    BubbleSelection(top.key, OmrAnswerStatus.OK, listOf(top.key))
+                }
+                else -> {
+                    BubbleSelection(top.key, OmrAnswerStatus.UNCERTAIN, listOf(top.key))
+                }
             }
         }
     }

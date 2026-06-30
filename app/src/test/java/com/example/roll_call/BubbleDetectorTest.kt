@@ -167,7 +167,7 @@ class BubbleDetectorTest {
     }
 
     @Test
-    fun classifyAnswerSelection_returnsUncertain_whenSecondCandidateIsAboveFilledButNotStrongEnoughForMultiple() {
+    fun classifyAnswerSelection_returnsAnswer_whenSecondCandidateIsAboveFilledButClearlyWeaker() {
         val result = BubbleDetector.classifyAnswerSelection(
             mapOf("A" to 0.06, "B" to 0.08, "C" to 0.30, "D" to 0.46),
             filledThreshold = 0.28,
@@ -175,9 +175,9 @@ class BubbleDetectorTest {
             uncertainDelta = 0.08
         )
 
-        assertEquals(OmrAnswerStatus.UNCERTAIN, result.status)
+        assertEquals(OmrAnswerStatus.OK, result.status)
         assertEquals("D", result.selected)
-        assertEquals(listOf("D", "C"), result.filledCandidates)
+        assertEquals(listOf("D"), result.filledCandidates)
     }
 
     @Test

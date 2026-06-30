@@ -29,7 +29,7 @@ class BubbleDetector(
         val roiRect = Rect(left, top, right - left, bottom - top)
         val roi = Mat(binaryInverse, roiRect)
         val mask = Mat.zeros(roi.rows(), roi.cols(), CvType.CV_8UC1)
-        val readRadius = (cropRadius * 0.76).toInt()
+        val readRadius = (cropRadius * 0.62).toInt()
             .coerceAtLeast(3)
             .coerceAtMost(minOf(roi.cols(), roi.rows()) / 2)
         Imgproc.circle(
@@ -165,7 +165,7 @@ class BubbleDetector(
                 strongMultipleCandidates.size > 1 -> {
                     BubbleSelection(top.key, OmrAnswerStatus.MULTIPLE, strongMultipleCandidates.map { it.key })
                 }
-                filled.size > 1 -> {
+                filled.size > 1 && second != null && top.value - second.value < uncertainDelta -> {
                     BubbleSelection(top.key, OmrAnswerStatus.UNCERTAIN, filled.map { it.key })
                 }
                 else -> BubbleSelection(top.key, OmrAnswerStatus.OK, listOf(top.key))

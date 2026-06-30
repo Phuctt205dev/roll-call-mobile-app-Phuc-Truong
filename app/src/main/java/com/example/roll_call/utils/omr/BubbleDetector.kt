@@ -29,7 +29,7 @@ class BubbleDetector(
         val roiRect = Rect(left, top, right - left, bottom - top)
         val roi = Mat(binaryInverse, roiRect)
         val mask = Mat.zeros(roi.rows(), roi.cols(), CvType.CV_8UC1)
-        val readRadius = (cropRadius * 0.58).toInt()
+        val readRadius = (cropRadius * 0.62).toInt()
             .coerceAtLeast(3)
             .coerceAtMost(minOf(roi.cols(), roi.rows()) / 2)
         Imgproc.circle(
@@ -90,8 +90,8 @@ class BubbleDetector(
 
     companion object {
         private const val SOFT_SELECTION_RATIO = 1.35
-        private const val ANSWER_FILLED_THRESHOLD_FACTOR = 1.18
-        private const val ANSWER_BLANK_THRESHOLD_FACTOR = 2.7
+        private const val ANSWER_FILLED_THRESHOLD_FACTOR = 1.0
+        private const val ANSWER_BLANK_THRESHOLD_FACTOR = 2.25
         private const val DIGIT_DOMINANCE_RATIO = 1.22
         private const val DIGIT_DELTA_FACTOR = 0.55
         private const val DIGIT_BASELINE_DELTA_FACTOR = 0.35
@@ -151,9 +151,6 @@ class BubbleDetector(
 
             return when {
                 filled.isEmpty() -> BubbleSelection(null, OmrAnswerStatus.BLANK, emptyList())
-                filled.size > 1 && second != null &&
-                    top.value - second.value >= uncertainDelta &&
-                    top.value >= second.value * SOFT_SELECTION_RATIO -> BubbleSelection(top.key, OmrAnswerStatus.OK, listOf(top.key))
                 filled.size > 1 -> BubbleSelection(top.key, OmrAnswerStatus.MULTIPLE, filled.map { it.key })
                 second != null && top.value - second.value < uncertainDelta -> {
                     BubbleSelection(top.key, OmrAnswerStatus.UNCERTAIN, listOf(top.key))

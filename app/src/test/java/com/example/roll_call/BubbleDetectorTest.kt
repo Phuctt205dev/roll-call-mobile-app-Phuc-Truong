@@ -116,7 +116,7 @@ class BubbleDetectorTest {
     @Test
     fun classifyAnswerSelection_returnsBlank_whenOnlyPrintedOutlineLooksDark() {
         val result = BubbleDetector.classifyAnswerSelection(
-            mapOf("A" to 0.07, "B" to 0.09, "C" to 0.08, "D" to 0.31),
+            mapOf("A" to 0.07, "B" to 0.09, "C" to 0.08, "D" to 0.26),
             filledThreshold = 0.28,
             blankThreshold = 0.12,
             uncertainDelta = 0.08
@@ -127,9 +127,21 @@ class BubbleDetectorTest {
     }
 
     @Test
+    fun classifyAnswerSelection_returnsMultiple_whenTwoAnswersAreFilled() {
+        val result = BubbleDetector.classifyAnswerSelection(
+            mapOf("A" to 0.05, "B" to 0.06, "C" to 0.34, "D" to 0.39),
+            filledThreshold = 0.28,
+            blankThreshold = 0.12,
+            uncertainDelta = 0.08
+        )
+
+        assertEquals(OmrAnswerStatus.MULTIPLE, result.status)
+        assertEquals("D", result.selected)
+    }
+    @Test
     fun classifyAnswerSelection_returnsAnswer_whenBubbleReachesFilledThreshold() {
         val result = BubbleDetector.classifyAnswerSelection(
-            mapOf("A" to 0.04, "B" to 0.06, "C" to 0.38, "D" to 0.07),
+            mapOf("A" to 0.04, "B" to 0.06, "C" to 0.31, "D" to 0.07),
             filledThreshold = 0.28,
             blankThreshold = 0.12,
             uncertainDelta = 0.08

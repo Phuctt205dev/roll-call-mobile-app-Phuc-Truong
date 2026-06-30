@@ -111,6 +111,7 @@ fun OMRScannerScreen(
     val uiState by viewModel.uiState.collectAsState()
     val alignmentExecutor = remember { Executors.newSingleThreadExecutor() }
     var localError by remember { mutableStateOf<String?>(null) }
+    var isFlashOn by remember { mutableStateOf(false) }
 
     var hasCameraPermission by remember {
         mutableStateOf(
@@ -141,6 +142,12 @@ fun OMRScannerScreen(
                     viewModel.processAlignmentBitmap(bitmap)
                 }
             }
+        }
+    }
+
+    LaunchedEffect(hasCameraPermission, isFlashOn) {
+        if (hasCameraPermission) {
+            setTorchEnabled(cameraController, isFlashOn)
         }
     }
 
@@ -181,6 +188,7 @@ fun OMRScannerScreen(
 
     DisposableEffect(Unit) {
         onDispose {
+            setTorchEnabled(cameraController, false)
             cameraController.clearImageAnalysisAnalyzer()
             alignmentExecutor.shutdown()
         }
@@ -239,6 +247,25 @@ fun OMRScannerScreen(
                 color = statusColor,
                 modifier = Modifier.align(Alignment.TopCenter).padding(16.dp)
             )
+
+            if (hasCameraPermission) {
+                Surface(
+                    modifier = Modifier.align(Alignment.TopEnd).padding(top = 16.dp, end = 16.dp),
+                    shape = RoundedCornerShape(50),
+                    color = Color.Black.copy(alpha = 0.58f)
+                ) {
+                    IconButton(
+                        onClick = { isFlashOn = !isFlashOn },
+                        modifier = Modifier.size(44.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.CameraAlt,
+                            contentDescription = if (isFlashOn) "T\u1eaft flash" else "B\u1eadt flash",
+                            tint = if (isFlashOn) EduOrange else Color.White
+                        )
+                    }
+                }
+            }
 
             if (uiState.isProcessing || uiState.isInitializing) {
                 Column(
@@ -519,6 +546,15 @@ private fun yuv420ToNv21(imageProxy: ImageProxy): ByteArray {
 
     return nv21
 }
+
+private fun setTorchEnabled(cameraController: LifecycleCameraController, enabled: Boolean) {
+    runCatching {
+        cameraController.javaClass
+            .getMethod("enableTorch", java.lang.Boolean.TYPE)
+            .invoke(cameraController, enabled)
+    }
+}
+
 private fun formatScore(value: Double): String {
     return if (value % 1.0 == 0.0) {
         value.toInt().toString()

@@ -29,7 +29,7 @@ class BubbleDetector(
         val roiRect = Rect(left, top, right - left, bottom - top)
         val roi = Mat(binaryInverse, roiRect)
         val mask = Mat.zeros(roi.rows(), roi.cols(), CvType.CV_8UC1)
-        val readRadius = (cropRadius * 0.68).toInt()
+        val readRadius = (cropRadius * 0.58).toInt()
             .coerceAtLeast(3)
             .coerceAtMost(minOf(roi.cols(), roi.rows()) / 2)
         Imgproc.circle(
@@ -90,6 +90,8 @@ class BubbleDetector(
 
     companion object {
         private const val SOFT_SELECTION_RATIO = 1.35
+        private const val ANSWER_FILLED_THRESHOLD_FACTOR = 1.18
+        private const val ANSWER_BLANK_THRESHOLD_FACTOR = 2.7
         private const val DIGIT_DOMINANCE_RATIO = 1.22
         private const val DIGIT_DELTA_FACTOR = 0.55
         private const val DIGIT_BASELINE_DELTA_FACTOR = 0.35
@@ -141,7 +143,10 @@ class BubbleDetector(
             val sorted = fillRatios.entries.sortedByDescending { it.value }
             val top = sorted.first()
             val second = sorted.drop(1).firstOrNull()
-            val effectiveFilledThreshold = maxOf(filledThreshold, blankThreshold)
+            val effectiveFilledThreshold = maxOf(
+                filledThreshold * ANSWER_FILLED_THRESHOLD_FACTOR,
+                blankThreshold * ANSWER_BLANK_THRESHOLD_FACTOR
+            )
             val filled = sorted.filter { it.value >= effectiveFilledThreshold }
 
             return when {

@@ -70,6 +70,15 @@ class BubbleDetector(
         )
     }
 
+    fun <T> classifyAnswerSelection(fillRatios: Map<T, Double>): BubbleSelection<T> {
+        return classifyAnswerSelection(
+            fillRatios = fillRatios,
+            filledThreshold = filledThreshold,
+            blankThreshold = blankThreshold,
+            uncertainDelta = uncertainDelta
+        )
+    }
+
     fun <T> classifyDigitColumn(fillRatios: Map<T, Double>): BubbleSelection<T> {
         return classifyDigitColumn(
             fillRatios = fillRatios,
@@ -81,6 +90,9 @@ class BubbleDetector(
 
     companion object {
         private const val SOFT_SELECTION_RATIO = 1.35
+        private const val ANSWER_SOFT_SELECTION_RATIO = 1.55
+        private const val ANSWER_SOFT_MIN_FACTOR = 0.72
+        private const val ANSWER_BLANK_MARGIN = 1.65
         private const val DIGIT_DOMINANCE_RATIO = 1.22
         private const val DIGIT_DELTA_FACTOR = 0.55
         private const val DIGIT_BASELINE_DELTA_FACTOR = 0.35
@@ -115,6 +127,42 @@ class BubbleDetector(
                     top.value - second.value >= uncertainDelta &&
                     top.value >= second.value * SOFT_SELECTION_RATIO -> BubbleSelection(top.key, OmrAnswerStatus.OK, listOf(top.key))
                 top.value < blankThreshold -> BubbleSelection(null, OmrAnswerStatus.BLANK, emptyList())
+                else -> BubbleSelection(top.key, OmrAnswerStatus.UNCERTAIN, listOf(top.key))
+            }
+        }
+
+        fun <T> classifyAnswerSelection(
+            fillRatios: Map<T, Double>,
+            filledThreshold: Double = 0.35,
+            blankThreshold: Double = 0.18,
+            uncertainDelta: Double = 0.08
+        ): BubbleSelection<T> {
+            if (fillRatios.isEmpty()) {
+                return BubbleSelection(null, OmrAnswerStatus.BLANK, emptyList())
+            }
+
+            val sorted = fillRatios.entries.sortedByDescending { it.value }
+            val top = sorted.first()
+            val second = sorted.drop(1).firstOrNull()
+            val secondValue = second?.value ?: 0.0
+            val filled = sorted.filter { it.value >= filledThreshold }
+            val softMin = maxOf(blankThreshold * ANSWER_BLANK_MARGIN, filledThreshold * ANSWER_SOFT_MIN_FACTOR)
+
+            return when {
+                filled.size > 1 && second != null &&
+                    top.value - second.value >= uncertainDelta &&
+                    top.value >= second.value * SOFT_SELECTION_RATIO -> BubbleSelection(top.key, OmrAnswerStatus.OK, listOf(top.key))
+                filled.size > 1 -> BubbleSelection(top.key, OmrAnswerStatus.MULTIPLE, filled.map { it.key })
+                filled.size == 1 && second != null && top.value - second.value < uncertainDelta -> {
+                    BubbleSelection(top.key, OmrAnswerStatus.UNCERTAIN, listOf(top.key))
+                }
+                filled.size == 1 -> BubbleSelection(top.key, OmrAnswerStatus.OK, listOf(top.key))
+                top.value < softMin -> BubbleSelection(null, OmrAnswerStatus.BLANK, emptyList())
+                second != null &&
+                    top.value - secondValue >= uncertainDelta &&
+                    (secondValue <= 0.01 || top.value >= secondValue * ANSWER_SOFT_SELECTION_RATIO) -> {
+                    BubbleSelection(top.key, OmrAnswerStatus.OK, listOf(top.key))
+                }
                 else -> BubbleSelection(top.key, OmrAnswerStatus.UNCERTAIN, listOf(top.key))
             }
         }

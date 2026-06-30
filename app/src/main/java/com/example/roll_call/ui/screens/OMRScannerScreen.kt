@@ -74,6 +74,7 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.roll_call.domain.model.omr.OmrScanResult
 import com.example.roll_call.ui.theme.EduBackground
+import com.example.roll_call.ui.theme.EduBlue
 import com.example.roll_call.ui.theme.EduGreen
 import com.example.roll_call.ui.theme.EduGreenLight
 import com.example.roll_call.ui.theme.EduOrange
@@ -87,10 +88,12 @@ import com.example.roll_call.ui.viewmodel.OmrRealtimeResult
 import com.example.roll_call.ui.viewmodel.OmrScannerViewModel
 import java.io.ByteArrayOutputStream
 import java.util.Locale
+import java.util.concurrent.Executors
 import kotlin.math.max
 
 
 private const val MAX_CAPTURE_DECODE_SIDE = 2600
+private const val MAX_ALIGNMENT_DECODE_SIDE = 900
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun OMRScannerScreen(
@@ -106,6 +109,7 @@ fun OMRScannerScreen(
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
     val uiState by viewModel.uiState.collectAsState()
+    val alignmentExecutor = remember { Executors.newSingleThreadExecutor() }
     var localError by remember { mutableStateOf<String?>(null) }
 
     var hasCameraPermission by remember {
@@ -124,8 +128,19 @@ fun OMRScannerScreen(
     val cameraController = remember {
         LifecycleCameraController(context).apply {
             cameraSelector = CameraSelector.DEFAULT_BACK_CAMERA
-            setEnabledUseCases(CameraController.IMAGE_CAPTURE)
+            setEnabledUseCases(CameraController.IMAGE_CAPTURE or CameraController.IMAGE_ANALYSIS)
             imageCaptureMode = ImageCapture.CAPTURE_MODE_MINIMIZE_LATENCY
+            setImageAnalysisAnalyzer(alignmentExecutor) { imageProxy ->
+                if (!viewModel.shouldAnalyzeAlignmentFrame()) {
+                    imageProxy.close()
+                    return@setImageAnalysisAnalyzer
+                }
+                val bitmap = imageProxyToBitmap(imageProxy, MAX_ALIGNMENT_DECODE_SIDE)
+                imageProxy.close()
+                if (bitmap != null) {
+                    viewModel.processAlignmentBitmap(bitmap)
+                }
+            }
         }
     }
 
@@ -159,7 +174,16 @@ fun OMRScannerScreen(
 
     DisposableEffect(lifecycleOwner, hasCameraPermission) {
         if (hasCameraPermission) cameraController.bindToLifecycle(lifecycleOwner)
-        onDispose { cameraController.unbind() }
+        onDispose {
+            if (hasCameraPermission) cameraController.unbind()
+        }
+    }
+
+    DisposableEffect(Unit) {
+        onDispose {
+            cameraController.clearImageAnalysisAnalyzer()
+            alignmentExecutor.shutdown()
+        }
     }
 
 
@@ -167,6 +191,7 @@ fun OMRScannerScreen(
     val statusColor = when {
         uiState.error != null || localError != null -> EduRed
         uiState.latestResult?.isComplete == true -> EduGreen
+        uiState.isSheetInFrame -> EduBlue
         else -> EduOrange
     }
 
@@ -195,7 +220,7 @@ fun OMRScannerScreen(
                     factory = { PreviewView(it).apply { controller = cameraController } },
                     modifier = Modifier.fillMaxSize()
                 )
-                OmrGuideOverlay(statusColor = if (uiState.isSheetInFrame) EduGreen else EduOrange)
+                OmrGuideOverlay(statusColor = statusColor)
             } else {
                 Column(
                     modifier = Modifier.align(Alignment.Center).padding(24.dp),
@@ -389,28 +414,28 @@ private fun OmrGuideOverlay(statusColor: Color) {
     }
 }
 
-private fun imageProxyToBitmap(imageProxy: ImageProxy): Bitmap? {
+private fun imageProxyToBitmap(imageProxy: ImageProxy, maxSide: Int = MAX_CAPTURE_DECODE_SIDE): Bitmap? {
     return try {
         val bitmap = when (imageProxy.format) {
             ImageFormat.JPEG -> {
                 val buffer = imageProxy.planes[0].buffer
                 val bytes = ByteArray(buffer.remaining())
                 buffer.get(bytes)
-                decodeSampledBitmap(bytes, MAX_CAPTURE_DECODE_SIDE)
+                decodeSampledBitmap(bytes, maxSide)
             }
             PixelFormat.RGBA_8888 -> {
                 val plane = imageProxy.planes[0]
                 val buffer = plane.buffer
                 Bitmap.createBitmap(imageProxy.width, imageProxy.height, Bitmap.Config.ARGB_8888).apply {
                     copyPixelsFromBuffer(buffer)
-                }.scaleDownIfNeeded(MAX_CAPTURE_DECODE_SIDE)
+                }.scaleDownIfNeeded(maxSide)
             }
             ImageFormat.YUV_420_888 -> {
                 val nv21 = yuv420ToNv21(imageProxy)
                 val yuvImage = YuvImage(nv21, ImageFormat.NV21, imageProxy.width, imageProxy.height, null)
                 val out = ByteArrayOutputStream()
                 yuvImage.compressToJpeg(Rect(0, 0, imageProxy.width, imageProxy.height), 86, out)
-                decodeSampledBitmap(out.toByteArray(), MAX_CAPTURE_DECODE_SIDE)
+                decodeSampledBitmap(out.toByteArray(), maxSide)
             }
             else -> null
         } ?: return null

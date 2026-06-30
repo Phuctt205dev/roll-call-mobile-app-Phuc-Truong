@@ -86,4 +86,29 @@ class BubbleDetectorTest {
         assertEquals(OmrAnswerStatus.UNCERTAIN, result.status)
         assertEquals(2, result.selected)
     }
+    @Test
+    fun classifyAnswerSelection_returnsBlank_whenBlankRowHasLightNoiseOnOneOption() {
+        val result = BubbleDetector.classifyAnswerSelection(
+            mapOf("A" to 0.05, "B" to 0.06, "C" to 0.04, "D" to 0.16),
+            filledThreshold = 0.28,
+            blankThreshold = 0.12,
+            uncertainDelta = 0.08
+        )
+
+        assertEquals(OmrAnswerStatus.BLANK, result.status)
+        assertNull(result.selected)
+    }
+
+    @Test
+    fun classifyAnswerSelection_returnsAnswer_whenWeakFillIsClearlyDominant() {
+        val result = BubbleDetector.classifyAnswerSelection(
+            mapOf("A" to 0.04, "B" to 0.06, "C" to 0.23, "D" to 0.07),
+            filledThreshold = 0.28,
+            blankThreshold = 0.12,
+            uncertainDelta = 0.08
+        )
+
+        assertEquals(OmrAnswerStatus.OK, result.status)
+        assertEquals("C", result.selected)
+    }
 }

@@ -55,7 +55,9 @@ class OmrScannerViewModel : ViewModel() {
     private val _uiState = MutableStateFlow(OmrScannerUiState())
     val uiState: StateFlow<OmrScannerUiState> = _uiState
 
-    private var openCvReady = false
+        private var openCvReady = false
+    private var alignmentProcessing = false
+    private var lastAlignmentAttemptMs = 0L
 
     private var initializedKey: String? = null
     private var classId: String = ""
@@ -110,6 +112,41 @@ class OmrScannerViewModel : ViewModel() {
                     )
                 }
             )
+        }
+    }
+    fun shouldAnalyzeAlignmentFrame(): Boolean {
+        val now = System.currentTimeMillis()
+        val state = _uiState.value
+        return !alignmentProcessing &&
+            !state.isInitializing &&
+            !state.isProcessing &&
+            !state.isScanPaused &&
+            state.latestResult == null &&
+            now - lastAlignmentAttemptMs >= ALIGNMENT_INTERVAL_MS
+    }
+
+    fun processAlignmentBitmap(bitmap: Bitmap) {
+        if (!shouldAnalyzeAlignmentFrame()) return
+        alignmentProcessing = true
+        lastAlignmentAttemptMs = System.currentTimeMillis()
+
+        viewModelScope.launch {
+            try {
+                if (!ensureOpenCv()) return@launch
+                val hasSheet = withContext(Dispatchers.Default) {
+                    OmrProcessor(debugEnabled = false).detectSheetInFrame(bitmap)
+                }
+                _uiState.value = _uiState.value.copy(
+                    isSheetInFrame = hasSheet,
+                    realtimeStatus = if (hasSheet) {
+                        "\u0110\u00e3 \u0111\u1eb7t \u0111\u00fang khung, b\u1ea5m Ch\u1ee5p ngay"
+                    } else {
+                        "C\u1ea7n 4 \u00f4 vu\u00f4ng \u0111en v\u00e0o 4 g\u00f3c khung"
+                    }
+                )
+            } finally {
+                alignmentProcessing = false
+            }
         }
     }
     fun processCapturedBitmap(bitmap: Bitmap, cacheDir: File?) {
@@ -342,5 +379,6 @@ class OmrScannerViewModel : ViewModel() {
 
     companion object {
         private const val MAX_CAPTURE_PROCESSING_SIDE = 2200
+        private const val ALIGNMENT_INTERVAL_MS = 900L
     }
 }

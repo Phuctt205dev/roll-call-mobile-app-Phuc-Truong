@@ -84,6 +84,20 @@ class OmrProcessor(
         release(source, preprocessed.gray, preprocessed.binaryInverse, warped, warpedPreprocessed.gray, warpedPreprocessed.binaryInverse)
         return result
     }
+    fun detectSheetInFrame(bitmap: Bitmap): Boolean {
+        val source = Mat()
+        return try {
+            Utils.bitmapToMat(bitmap, source)
+            val preprocessed = preprocessImage(source)
+            val markers = detectSheetMarkers(preprocessed.binaryInverse)
+            release(preprocessed.gray, preprocessed.binaryInverse)
+            markers.size >= 4
+        } catch (_: Exception) {
+            false
+        } finally {
+            release(source)
+        }
+    }
     fun createDebugOverlay(
         bitmap: Bitmap,
         answers: List<OmrQuestionAnswer>,
@@ -235,13 +249,13 @@ class OmrProcessor(
             val ratios = row.bubblesByOption.mapValues { (_, bubble) ->
                 bubbleDetector.readBubble(binaryInverse, bubble).fillRatio
             }
-            val selection = bubbleDetector.classifySelection(ratios, allowSoftSelection = true)
+            val selection = bubbleDetector.classifyAnswerSelection(ratios)
             if (selection.status != OmrAnswerStatus.OK) {
                 warnings += "C\u00e2u ${row.questionNumber}: ${selection.status.name}"
             }
             OmrQuestionAnswer(
                 questionNumber = row.questionNumber,
-                answer = if (selection.status == OmrAnswerStatus.OK) selection.selected else selection.selected,
+                answer = if (selection.status == OmrAnswerStatus.BLANK) null else selection.selected,
                 status = selection.status,
                 fillRatios = ratios
             )

@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "132835776436",
+    "project_id": "roll-call-app-12307",
+    "storage_bucket": "roll-call-app-12307.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:132835776436:android:6e6987684164bd524744e1",
+        "android_client_info": {
+          "package_name": "com.example.roll_call"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAv1SxQUw2aRnR766L-MFRUf1fkAEm30B4"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
